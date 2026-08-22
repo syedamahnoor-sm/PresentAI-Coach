@@ -15,11 +15,12 @@ BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
 RunningMode = mp.tasks.vision.RunningMode
-
+FaceLandmarker = mp.tasks.vision.FaceLandmarker
+FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
 
 # Path to the downloaded pose model
 MODEL_PATH = "models/pose_landmarker_lite.task"
-
+FACE_MODEL_PATH = "models/face_landmarker.task"
 
 # Create configuration for the pose detector
 options = PoseLandmarkerOptions(
@@ -34,10 +35,19 @@ options = PoseLandmarkerOptions(
     min_tracking_confidence=0.5,
 )
 
+face_options = FaceLandmarkerOptions(
+    base_options=BaseOptions(model_asset_path=FACE_MODEL_PATH),
+    running_mode=RunningMode.VIDEO,
+    num_faces=1,
+    min_face_detection_confidence=0.5,
+    min_face_presence_confidence=0.5,
+    min_tracking_confidence=0.5,
+)
 
 # Create pose detector
 pose_detector = PoseLandmarker.create_from_options(options)
 
+face_detector = FaceLandmarker.create_from_options(face_options)
 
 # -----------------------------
 # 2. Open webcam
@@ -99,49 +109,32 @@ SCORE_SMOOTHING_ALPHA = 0.15
 
 smoothed_posture_score = None
 
-def smooth_landmark_list(
-    raw_landmarks,
-    previous_landmarks,
-    alpha
-):
+
+def smooth_landmark_list(raw_landmarks, previous_landmarks, alpha):
     """
     Smooth a list of MediaPipe landmarks using EMA.
     """
 
     if previous_landmarks is None:
 
-        return [
-            [
-                landmark.x,
-                landmark.y,
-                landmark.z
-            ]
-            for landmark in raw_landmarks
-        ]
-
+        return [[landmark.x, landmark.y, landmark.z] for landmark in raw_landmarks]
 
     for i, landmark in enumerate(raw_landmarks):
 
         previous_landmarks[i][0] = (
-            alpha * landmark.x
-            + (1 - alpha)
-            * previous_landmarks[i][0]
+            alpha * landmark.x + (1 - alpha) * previous_landmarks[i][0]
         )
 
         previous_landmarks[i][1] = (
-            alpha * landmark.y
-            + (1 - alpha)
-            * previous_landmarks[i][1]
+            alpha * landmark.y + (1 - alpha) * previous_landmarks[i][1]
         )
 
         previous_landmarks[i][2] = (
-            alpha * landmark.z
-            + (1 - alpha)
-            * previous_landmarks[i][2]
+            alpha * landmark.z + (1 - alpha) * previous_landmarks[i][2]
         )
 
-
     return previous_landmarks
+
 
 # -----------------------------
 # 4. Process webcam frames
@@ -169,54 +162,37 @@ while cap.isOpened():
     timestamp_ms = time.monotonic_ns() // 1_000_000
 
     # Run pose detection
-    results = pose_detector.detect_for_video(mp_image, timestamp_ms)
+    pose_results = pose_detector.detect_for_video(mp_image, timestamp_ms)
+
+    face_results = face_detector.detect_for_video(mp_image, timestamp_ms)
 
     # -----------------------------
     # 5. Process detected pose
     # -----------------------------
 
-    if (
-        results.pose_landmarks
-        and results.pose_world_landmarks
-    ):
+    if pose_results.pose_landmarks and pose_results.pose_world_landmarks:
 
-        raw_landmarks = (
-            results.pose_landmarks[0]
-        )
+        raw_landmarks = pose_results.pose_landmarks[0]
 
-        raw_world_landmarks = (
-            results.pose_world_landmarks[0]
-        )
-
+        raw_world_landmarks = pose_results.pose_world_landmarks[0]
 
         height, width, _ = frame.shape
-
 
         # ---------------------------------
         # Smooth image landmarks
         # ---------------------------------
 
-        smoothed_landmarks = (
-            smooth_landmark_list(
-                raw_landmarks,
-                smoothed_landmarks,
-                SMOOTHING_ALPHA
-            )
+        smoothed_landmarks = smooth_landmark_list(
+            raw_landmarks, smoothed_landmarks, SMOOTHING_ALPHA
         )
-
 
         # ---------------------------------
         # Smooth 3D world landmarks
         # ---------------------------------
 
-        smoothed_world_landmarks = (
-            smooth_landmark_list(
-                raw_world_landmarks,
-                smoothed_world_landmarks,
-                SMOOTHING_ALPHA
-            )
+        smoothed_world_landmarks = smooth_landmark_list(
+            raw_world_landmarks, smoothed_world_landmarks, SMOOTHING_ALPHA
         )
-
 
         # =================================
         # CALIBRATION
@@ -226,36 +202,17 @@ while cap.isOpened():
 
             if calibration_start_time is None:
 
-                calibration_start_time = (
-                    time.monotonic()
-                )
+                calibration_start_time = time.monotonic()
 
+            calibration_elapsed = time.monotonic() - calibration_start_time
 
-            calibration_elapsed = (
-                time.monotonic()
-                - calibration_start_time
+            current_metrics = extract_posture_metrics(
+                smoothed_landmarks, smoothed_world_landmarks
             )
 
+            calibration_samples.append(current_metrics)
 
-            current_metrics = (
-                extract_posture_metrics(
-                    smoothed_landmarks,
-                    smoothed_world_landmarks
-                )
-            )
-
-
-            calibration_samples.append(
-                current_metrics
-            )
-
-
-            remaining = max(
-                0,
-                CALIBRATION_SECONDS
-                - calibration_elapsed
-            )
-
+            remaining = max(0, CALIBRATION_SECONDS - calibration_elapsed)
 
             cv2.putText(
                 frame,
@@ -264,9 +221,8 @@ while cap.isOpened():
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (0, 255, 255),
-                2
+                2,
             )
-
 
             cv2.putText(
                 frame,
@@ -275,28 +231,19 @@ while cap.isOpened():
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (0, 255, 255),
-                2
+                2,
             )
 
-
             if (
-                calibration_elapsed
-                >= CALIBRATION_SECONDS
+                calibration_elapsed >= CALIBRATION_SECONDS
                 and len(calibration_samples) >= 20
             ):
 
-                posture_baseline = (
-                    create_posture_baseline(
-                        calibration_samples
-                    )
-                )
+                posture_baseline = create_posture_baseline(calibration_samples)
 
-                print(
-                    "Posture calibration complete:"
-                )
+                print("Posture calibration complete:")
 
                 print(posture_baseline)
-
 
         # =================================
         # POSTURE ANALYSIS
@@ -305,46 +252,27 @@ while cap.isOpened():
         else:
 
             posture_result = analyze_posture(
-                smoothed_landmarks,
-                smoothed_world_landmarks,
-                posture_baseline
+                smoothed_landmarks, smoothed_world_landmarks, posture_baseline
             )
-
 
             # ---------------------------------
             # Smooth final posture score
             # ---------------------------------
 
-            current_score = (
-                posture_result["score"]
-            )
-
+            current_score = posture_result["score"]
 
             if smoothed_posture_score is None:
 
-                smoothed_posture_score = (
-                    current_score
-                )
+                smoothed_posture_score = current_score
 
             else:
 
                 smoothed_posture_score = (
-                    SCORE_SMOOTHING_ALPHA
-                    * current_score
-
-                    + (
-                        1
-                        - SCORE_SMOOTHING_ALPHA
-                    )
-                    * smoothed_posture_score
+                    SCORE_SMOOTHING_ALPHA * current_score
+                    + (1 - SCORE_SMOOTHING_ALPHA) * smoothed_posture_score
                 )
 
-
-            display_score = round(
-                smoothed_posture_score,
-                1
-            )
-
+            display_score = round(smoothed_posture_score, 1)
 
             if display_score >= 90:
                 display_status = "Excellent"
@@ -353,13 +281,10 @@ while cap.isOpened():
                 display_status = "Good"
 
             elif display_score >= 55:
-                display_status = (
-                    "Needs Improvement"
-                )
+                display_status = "Needs Improvement"
 
             else:
                 display_status = "Poor"
-
 
             # ---------------------------------
             # Main score
@@ -367,18 +292,13 @@ while cap.isOpened():
 
             cv2.putText(
                 frame,
-                (
-                    f"Posture: "
-                    f"{display_status} "
-                    f"({display_score}/100)"
-                ),
+                (f"Posture: " f"{display_status} " f"({display_score}/100)"),
                 (20, 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.75,
                 (0, 255, 0),
-                2
+                2,
             )
-
 
             # ---------------------------------
             # Temporary detailed metrics
@@ -386,69 +306,53 @@ while cap.isOpened():
 
             cv2.putText(
                 frame,
-                (
-                    f"Shoulders: "
-                    f"{posture_result['shoulder_score']}"
-                ),
+                (f"Shoulders: " f"{posture_result['shoulder_score']}"),
                 (20, 75),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 255, 255),
-                1
+                1,
             )
 
             cv2.putText(
                 frame,
-                (
-                    f"Sideways: "
-                    f"{posture_result['sideways_score']}"
-                ),
+                (f"Sideways: " f"{posture_result['sideways_score']}"),
                 (20, 100),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 255, 255),
-                1
+                1,
             )
 
             cv2.putText(
                 frame,
-                (
-                    f"Forward: "
-                    f"{posture_result['forward_score']}"
-                ),
+                (f"Forward: " f"{posture_result['forward_score']}"),
                 (20, 125),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 255, 255),
-                1
+                1,
             )
 
             cv2.putText(
                 frame,
-                (
-                    f"Head Tilt: "
-                    f"{posture_result['head_tilt_score']}"
-                ),
+                (f"Head Tilt: " f"{posture_result['head_tilt_score']}"),
                 (20, 150),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 255, 255),
-                1
+                1,
             )
 
             cv2.putText(
                 frame,
-                (
-                    f"Head Forward: "
-                    f"{posture_result['head_forward_score']}"
-                ),
+                (f"Head Forward: " f"{posture_result['head_forward_score']}"),
                 (20, 175),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 255, 255),
-                1
+                1,
             )
-
 
         # =================================
         # DRAW LANDMARKS
@@ -456,65 +360,58 @@ while cap.isOpened():
 
         for landmark in smoothed_landmarks:
 
-            x = int(
-                landmark[0] * width
-            )
+            x = int(landmark[0] * width)
 
-            y = int(
-                landmark[1] * height
-            )
+            y = int(landmark[1] * height)
 
-            cv2.circle(
-                frame,
-                (x, y),
-                4,
-                (0, 255, 0),
-                -1
-            )
-
+            cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
 
         # Draw skeleton
-        for (
-            start_index,
-            end_index
-        ) in POSE_CONNECTIONS:
+        for start_index, end_index in POSE_CONNECTIONS:
 
-            start = (
-                smoothed_landmarks[
-                    start_index
-                ]
-            )
+            start = smoothed_landmarks[start_index]
 
-            end = (
-                smoothed_landmarks[
-                    end_index
-                ]
-            )
+            end = smoothed_landmarks[end_index]
 
-            start_point = (
-                int(start[0] * width),
-                int(start[1] * height)
-            )
+            start_point = (int(start[0] * width), int(start[1] * height))
 
-            end_point = (
-                int(end[0] * width),
-                int(end[1] * height)
-            )
+            end_point = (int(end[0] * width), int(end[1] * height))
 
-            cv2.line(
-                frame,
-                start_point,
-                end_point,
-                (255, 255, 255),
-                2
-            )
-
+            cv2.line(frame, start_point, end_point, (255, 255, 255), 2)
 
     else:
 
         smoothed_landmarks = None
         smoothed_world_landmarks = None
+    
+    if face_results.face_landmarks:
+        face_landmarks = face_results.face_landmarks[0]
 
+        height, width, _ = frame.shape
+
+        # Draw only a few face landmarks for testing
+        important_face_points = [
+            1,    # nose region
+            10,   # forehead
+            152,  # chin
+            33,   # left eye outer corner
+            263,  # right eye outer corner
+        ]
+
+        for index in important_face_points:
+
+            landmark = face_landmarks[index]
+
+            x = int(landmark.x * width)
+            y = int(landmark.y * height)
+
+            cv2.circle(
+                frame,
+                (x, y),
+                3,
+                (0, 255, 255),
+                -1
+            )
     # -----------------------------
     # 6. Display result
     # -----------------------------
@@ -535,3 +432,4 @@ cap.release()
 cv2.destroyAllWindows()
 
 pose_detector.close()
+face_detector.close()
