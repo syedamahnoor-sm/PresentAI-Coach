@@ -6,6 +6,7 @@ from analyzer import (
     extract_posture_metrics,
     create_posture_baseline,
 )
+from feature_extractor import extract_features
 
 # -----------------------------
 # 1. MediaPipe Tasks setup
@@ -135,6 +136,8 @@ def smooth_landmark_list(raw_landmarks, previous_landmarks, alpha):
 
     return previous_landmarks
 
+
+last_feature_print = 0
 
 # -----------------------------
 # 4. Process webcam frames
@@ -383,18 +386,33 @@ while cap.isOpened():
 
         smoothed_landmarks = None
         smoothed_world_landmarks = None
-    
-    if face_results.face_landmarks:
-        face_landmarks = face_results.face_landmarks[0]
 
+    if (
+        face_results.face_landmarks
+        and smoothed_landmarks is not None
+        and smoothed_world_landmarks is not None
+    ):
+        face_landmarks = face_results.face_landmarks[0]
+        features = extract_features(
+            smoothed_landmarks, smoothed_world_landmarks, face_landmarks
+        )
+        current_time = time.monotonic()
+
+        if current_time - last_feature_print >= 1:
+            print("\nPosture Features")
+
+            for name, value in features.items():
+                print(f"{name}: {value:.3f}")
+
+            last_feature_print = current_time
         height, width, _ = frame.shape
 
         # Draw only a few face landmarks for testing
         important_face_points = [
-            1,    # nose region
-            10,   # forehead
+            1,  # nose region
+            10,  # forehead
             152,  # chin
-            33,   # left eye outer corner
+            33,  # left eye outer corner
             263,  # right eye outer corner
         ]
 
@@ -405,13 +423,7 @@ while cap.isOpened():
             x = int(landmark.x * width)
             y = int(landmark.y * height)
 
-            cv2.circle(
-                frame,
-                (x, y),
-                3,
-                (0, 255, 255),
-                -1
-            )
+            cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
     # -----------------------------
     # 6. Display result
     # -----------------------------
