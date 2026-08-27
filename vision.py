@@ -5,6 +5,7 @@ import mediapipe as mp
 from feature_extractor import extract_features
 from posture_scorer import PostureScorer
 from gesture_analyzer import GestureAnalyzer
+from gaze_analyzer import GazeAnalyzer
 
 # =========================================================
 # 1. MEDIAPIPE TASKS SETUP
@@ -84,6 +85,7 @@ posture_scorer = PostureScorer(
 )
 
 gesture_analyzer = GestureAnalyzer()
+gaze_analyzer = GazeAnalyzer()
 
 # =========================================================
 # 2. OPEN WEBCAM
@@ -475,6 +477,42 @@ while cap.isOpened():
                         1,
                     )
             
+            # =================================================
+            # GAZE / EYE-CONTACT ANALYSIS
+            # =================================================
+
+            gaze_result = gaze_analyzer.update(            
+                face_landmarks
+            )
+
+            if gaze_result is not None:
+
+                cv2.putText(
+                    frame,
+                    (            
+                        f"Eye Contact: "
+                        f"{gaze_result['status']} "
+                       f"({gaze_result['score']}/100)"
+                    ),
+                    (20, 160),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65,
+                    (255, 200, 0),
+                    2,
+                )
+
+                cv2.putText(
+                    frame,
+                    gaze_result["feedback"],
+                    (20, 190),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    1,
+                )
+            
+            
+            
             # =============================================
             # MAIN POSTURE SCORE
             # =============================================
@@ -693,6 +731,7 @@ while cap.isOpened():
         posture_scorer.reset()
 
         gesture_analyzer.reset()
+        gaze_analyzer.reset()
         
         cv2.putText(
 
