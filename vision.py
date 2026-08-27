@@ -4,7 +4,7 @@ import mediapipe as mp
 
 from feature_extractor import extract_features
 from posture_scorer import PostureScorer
-
+from gesture_analyzer import GestureAnalyzer
 
 # =========================================================
 # 1. MEDIAPIPE TASKS SETUP
@@ -83,6 +83,7 @@ posture_scorer = PostureScorer(
     model_path="models/posture_classifier.pkl"
 )
 
+gesture_analyzer = GestureAnalyzer()
 
 # =========================================================
 # 2. OPEN WEBCAM
@@ -438,7 +439,42 @@ while cap.isOpened():
                     255
                 )
 
+            # =================================================
+            # GESTURE ANALYSIS
+            # =================================================
 
+            gesture_result = gesture_analyzer.update(
+                            smoothed_landmarks
+            )
+
+            if gesture_result is not None:
+
+                cv2.putText(
+                    frame,
+                    (
+                        f"Gestures: "
+                        f"{gesture_result['status']} "
+                        f"({gesture_result['score']}/100)"
+                    )            ,
+                    (20, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.65,
+                    (255, 255, 0),
+                    2,
+                )
+
+                if gesture_result["feedback"]:
+
+                    cv2.putText(
+                        frame,
+                        gesture_result["feedback"][0],
+                        (20, 130),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                    )
+            
             # =============================================
             # MAIN POSTURE SCORE
             # =============================================
@@ -656,7 +692,8 @@ while cap.isOpened():
         # does not carry over when the person returns.
         posture_scorer.reset()
 
-
+        gesture_analyzer.reset()
+        
         cv2.putText(
 
             frame,
