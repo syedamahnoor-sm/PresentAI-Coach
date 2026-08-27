@@ -2,3 +2,6 @@ opencv-python
 mediapipe
 numpy
 PyYAML
+pandas
+scikit-learn
+joblib

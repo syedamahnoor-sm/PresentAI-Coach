@@ -1,43 +1,59 @@
 import cv2
 import time
 import mediapipe as mp
-from analyzer import (
-    analyze_posture,
-    extract_posture_metrics,
-    create_posture_baseline,
-)
-from feature_extractor import extract_features
 
-# -----------------------------
-# 1. MediaPipe Tasks setup
-# -----------------------------
+from feature_extractor import extract_features
+from posture_scorer import PostureScorer
+
+
+# =========================================================
+# 1. MEDIAPIPE TASKS SETUP
+# =========================================================
 
 BaseOptions = mp.tasks.BaseOptions
+
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-RunningMode = mp.tasks.vision.RunningMode
+
 FaceLandmarker = mp.tasks.vision.FaceLandmarker
 FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
 
-# Path to the downloaded pose model
-MODEL_PATH = "models/pose_landmarker_lite.task"
+RunningMode = mp.tasks.vision.RunningMode
+
+
+# =========================================================
+# MODEL PATHS
+# =========================================================
+
+POSE_MODEL_PATH = "models/pose_landmarker_lite.task"
+
 FACE_MODEL_PATH = "models/face_landmarker.task"
 
-# Create configuration for the pose detector
-options = PoseLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path=MODEL_PATH),
-    # We are processing webcam frames continuously
+
+# =========================================================
+# POSE DETECTOR CONFIGURATION
+# =========================================================
+
+pose_options = PoseLandmarkerOptions(
+    base_options=BaseOptions(
+        model_asset_path=POSE_MODEL_PATH
+    ),
     running_mode=RunningMode.VIDEO,
-    # Detect only one person
     num_poses=1,
-    # Confidence thresholds
     min_pose_detection_confidence=0.5,
     min_pose_presence_confidence=0.5,
     min_tracking_confidence=0.5,
 )
 
+
+# =========================================================
+# FACE DETECTOR CONFIGURATION
+# =========================================================
+
 face_options = FaceLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path=FACE_MODEL_PATH),
+    base_options=BaseOptions(
+        model_asset_path=FACE_MODEL_PATH
+    ),
     running_mode=RunningMode.VIDEO,
     num_faces=1,
     min_face_detection_confidence=0.5,
@@ -45,403 +61,650 @@ face_options = FaceLandmarkerOptions(
     min_tracking_confidence=0.5,
 )
 
-# Create pose detector
-pose_detector = PoseLandmarker.create_from_options(options)
 
-face_detector = FaceLandmarker.create_from_options(face_options)
+# =========================================================
+# CREATE DETECTORS
+# =========================================================
 
-# -----------------------------
-# 2. Open webcam
-# -----------------------------
+pose_detector = PoseLandmarker.create_from_options(
+    pose_options
+)
+
+face_detector = FaceLandmarker.create_from_options(
+    face_options
+)
+
+
+# =========================================================
+# CREATE ML POSTURE SCORER
+# =========================================================
+
+posture_scorer = PostureScorer(
+    model_path="models/posture_classifier.pkl"
+)
+
+
+# =========================================================
+# 2. OPEN WEBCAM
+# =========================================================
 
 cap = cv2.VideoCapture(0)
 
 
-# -----------------------------
-# 3. Pose connections
-# -----------------------------
+if not cap.isOpened():
 
-# We define simple connections ourselves because we are no longer
-# using the old mp.solutions.drawing_utils API.
+    raise RuntimeError(
+        "Could not open webcam."
+    )
+
+
+# =========================================================
+# 3. POSE CONNECTIONS
+# =========================================================
 
 POSE_CONNECTIONS = [
-    (0, 11),  # nose -> left shoulder
-    (0, 12),  # nose -> right shoulder
+
+    (0, 11),   # nose -> left shoulder
+    (0, 12),   # nose -> right shoulder
+
     (11, 12),  # shoulders
+
     (11, 13),  # left shoulder -> left elbow
     (13, 15),  # left elbow -> left wrist
+
     (12, 14),  # right shoulder -> right elbow
     (14, 16),  # right elbow -> right wrist
+
     (11, 23),  # left shoulder -> left hip
     (12, 24),  # right shoulder -> right hip
+
     (23, 24),  # hips
+
     (23, 25),  # left hip -> left knee
     (25, 27),  # left knee -> left ankle
+
     (24, 26),  # right hip -> right knee
     (26, 28),  # right knee -> right ankle
 ]
 
+
+# =========================================================
+# 4. LANDMARK SMOOTHING
+# =========================================================
+
 SMOOTHING_ALPHA = 0.25
 
-# Image landmarks used for drawing
+
 smoothed_landmarks = None
 
-# 3D world landmarks used for posture analysis
 smoothed_world_landmarks = None
 
 
-# ---------------------------------
-# Calibration
-# ---------------------------------
-
-CALIBRATION_SECONDS = 3
-
-calibration_start_time = None
-calibration_samples = []
-
-posture_baseline = None
-
-
-# ---------------------------------
-# Score smoothing
-# ---------------------------------
-
-SCORE_SMOOTHING_ALPHA = 0.15
-
-smoothed_posture_score = None
-
-
-def smooth_landmark_list(raw_landmarks, previous_landmarks, alpha):
+def smooth_landmark_list(
+    raw_landmarks,
+    previous_landmarks,
+    alpha
+):
     """
-    Smooth a list of MediaPipe landmarks using EMA.
+    Smooth MediaPipe landmarks using
+    Exponential Moving Average.
     """
 
     if previous_landmarks is None:
 
-        return [[landmark.x, landmark.y, landmark.z] for landmark in raw_landmarks]
+        return [
+            [
+                landmark.x,
+                landmark.y,
+                landmark.z
+            ]
+            for landmark in raw_landmarks
+        ]
 
-    for i, landmark in enumerate(raw_landmarks):
+
+    for i, landmark in enumerate(
+        raw_landmarks
+    ):
 
         previous_landmarks[i][0] = (
-            alpha * landmark.x + (1 - alpha) * previous_landmarks[i][0]
+
+            alpha
+            * landmark.x
+
+            + (
+                1 - alpha
+            )
+            * previous_landmarks[i][0]
         )
+
 
         previous_landmarks[i][1] = (
-            alpha * landmark.y + (1 - alpha) * previous_landmarks[i][1]
+
+            alpha
+            * landmark.y
+
+            + (
+                1 - alpha
+            )
+            * previous_landmarks[i][1]
         )
 
+
         previous_landmarks[i][2] = (
-            alpha * landmark.z + (1 - alpha) * previous_landmarks[i][2]
+
+            alpha
+            * landmark.z
+
+            + (
+                1 - alpha
+            )
+            * previous_landmarks[i][2]
         )
+
 
     return previous_landmarks
 
 
-last_feature_print = 0
-
-# -----------------------------
-# 4. Process webcam frames
-# -----------------------------
+# =========================================================
+# 5. MAIN WEBCAM LOOP
+# =========================================================
 
 while cap.isOpened():
 
     success, frame = cap.read()
 
+
     if not success:
-        print("Could not access webcam.")
+
+        print(
+            "Could not access webcam."
+        )
+
         break
 
-    # Flip the image so it behaves like a mirror
-    frame = cv2.flip(frame, 1)
 
-    # OpenCV gives us BGR images
-    # MediaPipe expects RGB
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # -----------------------------------------------------
+    # Mirror image
+    # -----------------------------------------------------
 
-    # Convert NumPy image into a MediaPipe Image
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+    frame = cv2.flip(
+        frame,
+        1
+    )
 
-    # MediaPipe VIDEO mode requires a timestamp
-    timestamp_ms = time.monotonic_ns() // 1_000_000
 
-    # Run pose detection
-    pose_results = pose_detector.detect_for_video(mp_image, timestamp_ms)
+    # -----------------------------------------------------
+    # Convert BGR -> RGB
+    # -----------------------------------------------------
 
-    face_results = face_detector.detect_for_video(mp_image, timestamp_ms)
+    rgb_frame = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2RGB
+    )
 
-    # -----------------------------
-    # 5. Process detected pose
-    # -----------------------------
 
-    if pose_results.pose_landmarks and pose_results.pose_world_landmarks:
+    # -----------------------------------------------------
+    # Convert NumPy image -> MediaPipe Image
+    # -----------------------------------------------------
 
-        raw_landmarks = pose_results.pose_landmarks[0]
+    mp_image = mp.Image(
+        image_format=mp.ImageFormat.SRGB,
+        data=rgb_frame
+    )
 
-        raw_world_landmarks = pose_results.pose_world_landmarks[0]
 
-        height, width, _ = frame.shape
+    # -----------------------------------------------------
+    # VIDEO mode requires increasing timestamp
+    # -----------------------------------------------------
 
-        # ---------------------------------
+    timestamp_ms = (
+        time.monotonic_ns()
+        // 1_000_000
+    )
+
+
+    # =====================================================
+    # RUN MEDIAPIPE
+    # =====================================================
+
+    pose_results = (
+        pose_detector.detect_for_video(
+            mp_image,
+            timestamp_ms
+        )
+    )
+
+
+    face_results = (
+        face_detector.detect_for_video(
+            mp_image,
+            timestamp_ms
+        )
+    )
+
+
+    # =====================================================
+    # PROCESS POSE
+    # =====================================================
+
+    if (
+        pose_results.pose_landmarks
+        and pose_results.pose_world_landmarks
+    ):
+
+        raw_landmarks = (
+            pose_results.pose_landmarks[0]
+        )
+
+
+        raw_world_landmarks = (
+            pose_results.pose_world_landmarks[0]
+        )
+
+
+        height, width, _ = (
+            frame.shape
+        )
+
+
+        # -------------------------------------------------
         # Smooth image landmarks
-        # ---------------------------------
+        # -------------------------------------------------
 
-        smoothed_landmarks = smooth_landmark_list(
-            raw_landmarks, smoothed_landmarks, SMOOTHING_ALPHA
+        smoothed_landmarks = (
+            smooth_landmark_list(
+
+                raw_landmarks,
+
+                smoothed_landmarks,
+
+                SMOOTHING_ALPHA
+            )
         )
 
-        # ---------------------------------
-        # Smooth 3D world landmarks
-        # ---------------------------------
 
-        smoothed_world_landmarks = smooth_landmark_list(
-            raw_world_landmarks, smoothed_world_landmarks, SMOOTHING_ALPHA
+        # -------------------------------------------------
+        # Smooth world landmarks
+        # -------------------------------------------------
+
+        smoothed_world_landmarks = (
+            smooth_landmark_list(
+
+                raw_world_landmarks,
+
+                smoothed_world_landmarks,
+
+                SMOOTHING_ALPHA
+            )
         )
 
-        # =================================
-        # CALIBRATION
-        # =================================
 
-        if posture_baseline is None:
+        # =================================================
+        # FACE IS OPTIONAL
+        # =================================================
 
-            if calibration_start_time is None:
+        face_landmarks = None
 
-                calibration_start_time = time.monotonic()
 
-            calibration_elapsed = time.monotonic() - calibration_start_time
+        if face_results.face_landmarks:
 
-            current_metrics = extract_posture_metrics(
-                smoothed_landmarks, smoothed_world_landmarks
+            face_landmarks = (
+                face_results.face_landmarks[0]
             )
 
-            calibration_samples.append(current_metrics)
 
-            remaining = max(0, CALIBRATION_SECONDS - calibration_elapsed)
+        # =================================================
+        # EXTRACT ML FEATURES
+        # =================================================
 
-            cv2.putText(
-                frame,
-                "Sit or stand naturally upright",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 255),
-                2,
+        features = extract_features(
+
+            smoothed_landmarks,
+
+            smoothed_world_landmarks,
+
+            face_landmarks
+        )
+
+
+        # =================================================
+        # ML POSTURE SCORING
+        # =================================================
+
+        if features is not None:
+
+            score_result = (
+                posture_scorer.update(
+                    features
+                )
             )
 
-            cv2.putText(
-                frame,
-                f"Calibrating: {remaining:.1f}s",
-                (20, 75),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 255),
-                2,
+
+            display_score = (
+                score_result["score"]
             )
+
+
+            display_status = (
+                score_result["status"]
+            )
+
+
+            # ---------------------------------------------
+            # Display color
+            # ---------------------------------------------
 
             if (
-                calibration_elapsed >= CALIBRATION_SECONDS
-                and len(calibration_samples) >= 20
+                display_status
+                == "Excellent"
             ):
 
-                posture_baseline = create_posture_baseline(calibration_samples)
-
-                print("Posture calibration complete:")
-
-                print(posture_baseline)
-
-        # =================================
-        # POSTURE ANALYSIS
-        # =================================
-
-        else:
-
-            posture_result = analyze_posture(
-                smoothed_landmarks, smoothed_world_landmarks, posture_baseline
-            )
-
-            # ---------------------------------
-            # Smooth final posture score
-            # ---------------------------------
-
-            current_score = posture_result["score"]
-
-            if smoothed_posture_score is None:
-
-                smoothed_posture_score = current_score
-
-            else:
-
-                smoothed_posture_score = (
-                    SCORE_SMOOTHING_ALPHA * current_score
-                    + (1 - SCORE_SMOOTHING_ALPHA) * smoothed_posture_score
+                score_color = (
+                    0,
+                    255,
+                    0
                 )
 
-            display_score = round(smoothed_posture_score, 1)
 
-            if display_score >= 90:
-                display_status = "Excellent"
+            elif (
+                display_status
+                == "Good"
+            ):
 
-            elif display_score >= 75:
-                display_status = "Good"
+                score_color = (
+                    0,
+                    220,
+                    0
+                )
 
-            elif display_score >= 55:
-                display_status = "Needs Improvement"
+
+            elif (
+                display_status
+                == "Needs Improvement"
+            ):
+
+                score_color = (
+                    0,
+                    200,
+                    255
+                )
+
 
             else:
-                display_status = "Poor"
 
-            # ---------------------------------
-            # Main score
-            # ---------------------------------
+                score_color = (
+                    0,
+                    0,
+                    255
+                )
+
+
+            # =============================================
+            # MAIN POSTURE SCORE
+            # =============================================
 
             cv2.putText(
+
                 frame,
-                (f"Posture: " f"{display_status} " f"({display_score}/100)"),
+
+                (
+                    f"Posture: "
+                    f"{display_status} "
+                    f"({display_score}/100)"
+                ),
+
                 (20, 40),
+
                 cv2.FONT_HERSHEY_SIMPLEX,
+
                 0.75,
-                (0, 255, 0),
-                2,
+
+                score_color,
+
+                2
             )
 
-            # ---------------------------------
-            # Temporary detailed metrics
-            # ---------------------------------
+
+            # =============================================
+            # ML CONFIDENCE
+            # =============================================
 
             cv2.putText(
+
                 frame,
-                (f"Shoulders: " f"{posture_result['shoulder_score']}"),
-                (20, 75),
+
+                (
+                    f"ML Good Confidence: "
+                    f"{score_result['good_probability']:.2f}"
+                ),
+
+                (20, 70),
+
                 cv2.FONT_HERSHEY_SIMPLEX,
+
                 0.5,
+
                 (255, 255, 255),
-                1,
+
+                1
             )
 
-            cv2.putText(
-                frame,
-                (f"Sideways: " f"{posture_result['sideways_score']}"),
-                (20, 100),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1,
-            )
 
-            cv2.putText(
-                frame,
-                (f"Forward: " f"{posture_result['forward_score']}"),
-                (20, 125),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1,
-            )
-
-            cv2.putText(
-                frame,
-                (f"Head Tilt: " f"{posture_result['head_tilt_score']}"),
-                (20, 150),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1,
-            )
-
-            cv2.putText(
-                frame,
-                (f"Head Forward: " f"{posture_result['head_forward_score']}"),
-                (20, 175),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1,
-            )
-
-        # =================================
-        # DRAW LANDMARKS
-        # =================================
+        # =================================================
+        # DRAW POSE LANDMARKS
+        # =================================================
 
         for landmark in smoothed_landmarks:
 
-            x = int(landmark[0] * width)
+            x = int(
+                landmark[0]
+                * width
+            )
 
-            y = int(landmark[1] * height)
+            y = int(
+                landmark[1]
+                * height
+            )
 
-            cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
 
-        # Draw skeleton
-        for start_index, end_index in POSE_CONNECTIONS:
+            cv2.circle(
 
-            start = smoothed_landmarks[start_index]
+                frame,
 
-            end = smoothed_landmarks[end_index]
+                (x, y),
 
-            start_point = (int(start[0] * width), int(start[1] * height))
+                4,
 
-            end_point = (int(end[0] * width), int(end[1] * height))
+                (0, 255, 0),
 
-            cv2.line(frame, start_point, end_point, (255, 255, 255), 2)
+                -1
+            )
+
+
+        # =================================================
+        # DRAW POSE SKELETON
+        # =================================================
+
+        for (
+            start_index,
+            end_index
+        ) in POSE_CONNECTIONS:
+
+            start = (
+                smoothed_landmarks[
+                    start_index
+                ]
+            )
+
+            end = (
+                smoothed_landmarks[
+                    end_index
+                ]
+            )
+
+
+            start_point = (
+
+                int(
+                    start[0]
+                    * width
+                ),
+
+                int(
+                    start[1]
+                    * height
+                )
+            )
+
+
+            end_point = (
+
+                int(
+                    end[0]
+                    * width
+                ),
+
+                int(
+                    end[1]
+                    * height
+                )
+            )
+
+
+            cv2.line(
+
+                frame,
+
+                start_point,
+
+                end_point,
+
+                (255, 255, 255),
+
+                2
+            )
+
+
+        # =================================================
+        # OPTIONAL FACE LANDMARK DRAWING
+        # =================================================
+
+        if face_landmarks is not None:
+
+            important_face_points = [
+
+                1,      # nose
+
+                10,     # forehead
+
+                152,    # chin
+
+                33,     # left eye
+
+                263,    # right eye
+            ]
+
+
+            for index in (
+                important_face_points
+            ):
+
+                landmark = (
+                    face_landmarks[
+                        index
+                    ]
+                )
+
+
+                x = int(
+                    landmark.x
+                    * width
+                )
+
+                y = int(
+                    landmark.y
+                    * height
+                )
+
+
+                cv2.circle(
+
+                    frame,
+
+                    (x, y),
+
+                    3,
+
+                    (0, 255, 255),
+
+                    -1
+                )
+
+
+    # =====================================================
+    # NO PERSON DETECTED
+    # =====================================================
 
     else:
 
         smoothed_landmarks = None
+
         smoothed_world_landmarks = None
 
-    if (
-        face_results.face_landmarks
-        and smoothed_landmarks is not None
-        and smoothed_world_landmarks is not None
-    ):
-        face_landmarks = face_results.face_landmarks[0]
-        features = extract_features(
-            smoothed_landmarks, smoothed_world_landmarks, face_landmarks
+
+        # Clear score history so an old score
+        # does not carry over when the person returns.
+        posture_scorer.reset()
+
+
+        cv2.putText(
+
+            frame,
+
+            "No pose detected",
+
+            (20, 40),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.7,
+
+            (0, 0, 255),
+
+            2
         )
-        current_time = time.monotonic()
 
-        if current_time - last_feature_print >= 1:
-            print("\nPosture Features")
 
-            for name, value in features.items():
-                print(f"{name}: {value:.3f}")
+    # =====================================================
+    # 6. DISPLAY WINDOW
+    # =====================================================
 
-            last_feature_print = current_time
-        height, width, _ = frame.shape
+    cv2.imshow(
 
-        # Draw only a few face landmarks for testing
-        important_face_points = [
-            1,  # nose region
-            10,  # forehead
-            152,  # chin
-            33,  # left eye outer corner
-            263,  # right eye outer corner
-        ]
+        "PresentAI Coach - Pose Detection",
 
-        for index in important_face_points:
+        frame
+    )
 
-            landmark = face_landmarks[index]
 
-            x = int(landmark.x * width)
-            y = int(landmark.y * height)
+    # Press Q to quit
+    if (
+        cv2.waitKey(1)
+        & 0xFF
+        == ord("q")
+    ):
 
-            cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
-    # -----------------------------
-    # 6. Display result
-    # -----------------------------
-
-    cv2.imshow("PresentAI Coach - Pose Detection", frame)
-
-    # Press Q to exit
-    if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 
-# -----------------------------
-# 7. Clean up
-# -----------------------------
+# =========================================================
+# 7. CLEANUP
+# =========================================================
 
 cap.release()
 
 cv2.destroyAllWindows()
 
 pose_detector.close()
+
 face_detector.close()
