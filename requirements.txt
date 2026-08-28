@@ -5,3 +5,6 @@ PyYAML
 pandas
 scikit-learn
 joblib
+faster-whisper
+scipy
+sounddevice
