@@ -6,6 +6,8 @@ from feature_extractor import extract_features
 from posture_scorer import PostureScorer
 from gesture_analyzer import GestureAnalyzer
 from gaze_analyzer import GazeAnalyzer
+from session_manager import SessionManager
+
 
 # =========================================================
 # 1. MEDIAPIPE TASKS SETUP
@@ -26,9 +28,13 @@ RunningMode = mp.tasks.vision.RunningMode
 # MODEL PATHS
 # =========================================================
 
-POSE_MODEL_PATH = "models/pose_landmarker_lite.task"
+POSE_MODEL_PATH = (
+    "models/pose_landmarker_lite.task"
+)
 
-FACE_MODEL_PATH = "models/face_landmarker.task"
+FACE_MODEL_PATH = (
+    "models/face_landmarker.task"
+)
 
 
 # =========================================================
@@ -67,17 +73,21 @@ face_options = FaceLandmarkerOptions(
 # CREATE DETECTORS
 # =========================================================
 
-pose_detector = PoseLandmarker.create_from_options(
-    pose_options
+pose_detector = (
+    PoseLandmarker.create_from_options(
+        pose_options
+    )
 )
 
-face_detector = FaceLandmarker.create_from_options(
-    face_options
+face_detector = (
+    FaceLandmarker.create_from_options(
+        face_options
+    )
 )
 
 
 # =========================================================
-# CREATE ML POSTURE SCORER
+# CREATE ANALYZERS
 # =========================================================
 
 posture_scorer = PostureScorer(
@@ -85,7 +95,20 @@ posture_scorer = PostureScorer(
 )
 
 gesture_analyzer = GestureAnalyzer()
+
 gaze_analyzer = GazeAnalyzer()
+
+
+# =========================================================
+# CREATE SESSION MANAGER
+# =========================================================
+
+session_manager = SessionManager(
+    sample_interval=1.0
+)
+
+session_manager.start_session()
+
 
 # =========================================================
 # 2. OPEN WEBCAM
@@ -107,27 +130,27 @@ if not cap.isOpened():
 
 POSE_CONNECTIONS = [
 
-    (0, 11),   # nose -> left shoulder
-    (0, 12),   # nose -> right shoulder
+    (0, 11),
+    (0, 12),
 
-    (11, 12),  # shoulders
+    (11, 12),
 
-    (11, 13),  # left shoulder -> left elbow
-    (13, 15),  # left elbow -> left wrist
+    (11, 13),
+    (13, 15),
 
-    (12, 14),  # right shoulder -> right elbow
-    (14, 16),  # right elbow -> right wrist
+    (12, 14),
+    (14, 16),
 
-    (11, 23),  # left shoulder -> left hip
-    (12, 24),  # right shoulder -> right hip
+    (11, 23),
+    (12, 24),
 
-    (23, 24),  # hips
+    (23, 24),
 
-    (23, 25),  # left hip -> left knee
-    (25, 27),  # left knee -> left ankle
+    (23, 25),
+    (25, 27),
 
-    (24, 26),  # right hip -> right knee
-    (26, 28),  # right knee -> right ankle
+    (24, 26),
+    (26, 28),
 ]
 
 
@@ -224,6 +247,15 @@ while cap.isOpened():
         )
 
         break
+
+
+    # -----------------------------------------------------
+    # Results for this frame
+    # -----------------------------------------------------
+
+    posture_result = None
+    gesture_result = None
+    gaze_result = None
 
 
     # -----------------------------------------------------
@@ -376,7 +408,7 @@ while cap.isOpened():
 
         if features is not None:
 
-            score_result = (
+            posture_result = (
                 posture_scorer.update(
                     features
                 )
@@ -384,12 +416,12 @@ while cap.isOpened():
 
 
             display_score = (
-                score_result["score"]
+                posture_result["score"]
             )
 
 
             display_status = (
-                score_result["status"]
+                posture_result["status"]
             )
 
 
@@ -441,13 +473,17 @@ while cap.isOpened():
                     255
                 )
 
+
             # =================================================
             # GESTURE ANALYSIS
             # =================================================
 
-            gesture_result = gesture_analyzer.update(
-                            smoothed_landmarks
+            gesture_result = (
+                gesture_analyzer.update(
+                    smoothed_landmarks
+                )
             )
+
 
             if gesture_result is not None:
 
@@ -457,7 +493,7 @@ while cap.isOpened():
                         f"Gestures: "
                         f"{gesture_result['status']} "
                         f"({gesture_result['score']}/100)"
-                    )            ,
+                    ),
                     (20, 100),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.65,
@@ -465,34 +501,43 @@ while cap.isOpened():
                     2,
                 )
 
-                if gesture_result["feedback"]:
+
+                if gesture_result[
+                    "feedback"
+                ]:
 
                     cv2.putText(
                         frame,
-                        gesture_result["feedback"][0],
+                        gesture_result[
+                            "feedback"
+                        ][0],
                         (20, 130),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
                         (255, 255, 255),
                         1,
                     )
-            
+
+
             # =================================================
             # GAZE / EYE-CONTACT ANALYSIS
             # =================================================
 
-            gaze_result = gaze_analyzer.update(            
-                face_landmarks
+            gaze_result = (
+                gaze_analyzer.update(
+                    face_landmarks
+                )
             )
+
 
             if gaze_result is not None:
 
                 cv2.putText(
                     frame,
-                    (            
+                    (
                         f"Eye Contact: "
                         f"{gaze_result['status']} "
-                       f"({gaze_result['score']}/100)"
+                        f"({gaze_result['score']}/100)"
                     ),
                     (20, 160),
                     cv2.FONT_HERSHEY_SIMPLEX,
@@ -501,21 +546,34 @@ while cap.isOpened():
                     2,
                 )
 
+
                 cv2.putText(
                     frame,
-                    gaze_result["feedback"],
+                    gaze_result[
+                        "feedback"
+                    ],
                     (20, 190),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255, 255, 255),
                     1,
                 )
-            
-            
-            
-            # =============================================
+
+
+            # =================================================
+            # SESSION MANAGER
+            # =================================================
+
+            session_manager.update_visual(
+                posture_result=posture_result,
+                gesture_result=gesture_result,
+                gaze_result=gaze_result,
+            )
+
+
+            # =================================================
             # MAIN POSTURE SCORE
-            # =============================================
+            # =================================================
 
             cv2.putText(
 
@@ -539,9 +597,9 @@ while cap.isOpened():
             )
 
 
-            # =============================================
+            # =================================================
             # ML CONFIDENCE
-            # =============================================
+            # =================================================
 
             cv2.putText(
 
@@ -549,7 +607,7 @@ while cap.isOpened():
 
                 (
                     f"ML Good Confidence: "
-                    f"{score_result['good_probability']:.2f}"
+                    f"{posture_result['good_probability']:.2f}"
                 ),
 
                 (20, 70),
@@ -667,15 +725,11 @@ while cap.isOpened():
 
             important_face_points = [
 
-                1,      # nose
-
-                10,     # forehead
-
-                152,    # chin
-
-                33,     # left eye
-
-                263,    # right eye
+                1,
+                10,
+                152,
+                33,
+                263,
             ]
 
 
@@ -727,12 +781,14 @@ while cap.isOpened():
 
 
         # Clear score history so an old score
-        # does not carry over when the person returns.
+        # does not carry over when person returns.
         posture_scorer.reset()
 
         gesture_analyzer.reset()
+
         gaze_analyzer.reset()
-        
+
+
         cv2.putText(
 
             frame,
@@ -774,7 +830,56 @@ while cap.isOpened():
 
 
 # =========================================================
-# 7. CLEANUP
+# 7. END VISUAL SESSION
+# =========================================================
+
+visual_report = (
+    session_manager.end_session()
+)
+
+
+print()
+print(
+    "===================================="
+)
+print(
+    "VISUAL SESSION SUMMARY"
+)
+print(
+    "===================================="
+)
+
+
+print(
+    f"Posture: "
+    f"{visual_report['dimension_scores'].get('posture')}"
+)
+
+print(
+    f"Gestures: "
+    f"{visual_report['dimension_scores'].get('gesture')}"
+)
+
+print(
+    f"Eye Contact: "
+    f"{visual_report['dimension_scores'].get('gaze')}"
+)
+
+
+print()
+print(
+    "Visual Samples:"
+)
+
+print(
+    visual_report[
+        "visual_samples"
+    ]
+)
+
+
+# =========================================================
+# 8. CLEANUP
 # =========================================================
 
 cap.release()
