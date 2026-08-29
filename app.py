@@ -1,5 +1,8 @@
 import streamlit as st
+import tempfile
+import os
 
+from video_analyzer import analyze_video
 # =========================================================
 # PAGE CONFIG
 # =========================================================
@@ -192,6 +195,453 @@ st.markdown(
 if "mode" not in st.session_state:
     st.session_state.mode = None
 
+if "analysis_report" not in st.session_state:
+    st.session_state.analysis_report = None
+    
+# =========================================================
+# ANALYSIS RESULTS UI
+# =========================================================
+
+def display_analysis_report(report):
+    """
+    Display the final PresentAI analysis report
+    inside the Streamlit interface.
+    """
+
+    if report is None:
+        return
+
+    st.write("")
+    st.write("")
+
+    st.markdown("## 📊 Presentation Analysis")
+
+    # =====================================================
+    # OVERALL RESULT
+    # =====================================================
+
+    overall_score = report.get(
+        "overall_score"
+    )
+
+    status = report.get(
+        "status",
+        "Not Available"
+    )
+
+    if overall_score is None:
+        overall_display = "N/A"
+    else:
+        overall_display = (
+            f"{overall_score}/100"
+        )
+
+    overall_col, status_col = st.columns(
+        [1, 1]
+    )
+
+    with overall_col:
+
+        st.metric(
+            "Overall Score",
+            overall_display
+        )
+
+    with status_col:
+
+        st.metric(
+            "Overall Status",
+            status
+        )
+
+    st.write("")
+
+    # =====================================================
+    # DIMENSION SCORES
+    # =====================================================
+
+    st.markdown(
+        "### Performance Breakdown"
+    )
+
+    dimension_scores = report.get(
+        "dimension_scores",
+        {}
+    )
+
+    posture = dimension_scores.get(
+        "posture"
+    )
+
+    gesture = dimension_scores.get(
+        "gesture"
+    )
+
+    gaze = dimension_scores.get(
+        "gaze"
+    )
+
+    speech = dimension_scores.get(
+        "speech"
+    )
+
+
+    def score_text(score):
+
+        if score is None:
+            return "N/A"
+
+        return f"{score}/100"
+
+
+    score_col1, score_col2, score_col3, score_col4 = (
+        st.columns(4)
+    )
+
+
+    with score_col1:
+
+        st.metric(
+            "🧍 Posture",
+            score_text(
+                posture
+            )
+        )
+
+
+    with score_col2:
+
+        st.metric(
+            "👋 Gestures",
+            score_text(
+                gesture
+            )
+        )
+
+
+    with score_col3:
+
+        st.metric(
+            "👁️ Eye Contact",
+            score_text(
+                gaze
+            )
+        )
+
+
+    with score_col4:
+
+        st.metric(
+            "🎙️ Speech",
+            score_text(
+                speech
+            )
+        )
+
+
+    # =====================================================
+    # STRENGTHS + IMPROVEMENT AREAS
+    # =====================================================
+
+    st.write("")
+
+    strength_col, improvement_col = (
+        st.columns(
+            2,
+            gap="large"
+        )
+    )
+
+
+    with strength_col:
+
+        with st.container(
+            border=True
+        ):
+
+            st.markdown(
+                "### ✅ Strengths"
+            )
+
+            strengths = report.get(
+                "strengths",
+                []
+            )
+
+            if strengths:
+
+                for strength in strengths:
+
+                    st.markdown(
+                        f"- {strength}"
+                    )
+
+            else:
+
+                st.caption(
+                    "No major strengths identified yet."
+                )
+
+
+    with improvement_col:
+
+        with st.container(
+            border=True
+        ):
+
+            st.markdown(
+                "### 🎯 Improvement Areas"
+            )
+
+            improvement_areas = report.get(
+                "improvement_areas",
+                []
+            )
+
+            if improvement_areas:
+
+                for area in improvement_areas:
+
+                    st.markdown(
+                        f"- {area}"
+                    )
+
+            else:
+
+                st.caption(
+                    "No major improvement areas identified."
+                )
+
+
+    # =====================================================
+    # RECOMMENDATIONS
+    # =====================================================
+
+    st.write("")
+
+    with st.container(
+        border=True
+    ):
+
+        st.markdown(
+            "### 💡 Recommendations"
+        )
+
+        recommendations = report.get(
+            "recommendations",
+            []
+        )
+
+        if recommendations:
+
+            for recommendation in recommendations:
+
+                st.markdown(
+                    f"- {recommendation}"
+                )
+
+        else:
+
+            st.caption(
+                "No recommendations available."
+            )
+
+
+    # =====================================================
+    # SPEECH ANALYSIS
+    # =====================================================
+
+    speech_metrics = report.get(
+        "speech_metrics"
+    )
+
+    if speech_metrics:
+
+        st.write("")
+
+        st.markdown(
+            "### 🎙️ Speech Analysis"
+        )
+
+        has_speech = (
+            speech_metrics.get(
+                "word_count",
+                0
+            )
+            > 0
+        )
+
+
+        speech_col1, speech_col2, speech_col3, speech_col4 = (
+            st.columns(4)
+        )
+
+
+        with speech_col1:
+
+            st.metric(
+                "Words",
+                speech_metrics.get(
+                    "word_count",
+                    0
+                )
+            )
+
+
+        with speech_col2:
+
+            if has_speech:
+
+                wpm_value = (
+                    speech_metrics.get(
+                        "wpm",
+                        0
+                    )
+                )
+
+            else:
+
+                wpm_value = "N/A"
+
+
+            st.metric(
+                "Speaking Pace",
+                (
+                    f"{wpm_value} WPM"
+                    if has_speech
+                    else "N/A"
+                )
+            )
+
+
+        with speech_col3:
+
+            st.metric(
+                "Filler Words",
+                speech_metrics.get(
+                    "filler_count",
+                    0
+                )
+            )
+
+
+        with speech_col4:
+
+            st.metric(
+                "Long Pauses",
+                speech_metrics.get(
+                    "long_pause_count",
+                    0
+                )
+            )
+
+
+        # -------------------------------------------------
+        # EXTRA SPEECH DETAILS
+        # -------------------------------------------------
+
+        if has_speech:
+
+            detail_col1, detail_col2 = (
+                st.columns(2)
+            )
+
+
+            with detail_col1:
+
+                st.metric(
+                    "Filler Rate",
+                    (
+                        f"{speech_metrics.get('filler_rate', 0)}%"
+                    )
+                )
+
+
+            with detail_col2:
+
+                st.metric(
+                    "Fluency",
+                    (
+                        f"{speech_metrics.get('fluency_score', 0)}/100"
+                    )
+                )
+
+
+        # =================================================
+        # TRANSCRIPT
+        # =================================================
+
+        transcript = speech_metrics.get(
+            "transcript",
+            ""
+        )
+
+        if transcript:
+
+            st.write("")
+
+            with st.expander(
+                "📝 View Transcript"
+            ):
+
+                st.write(
+                    transcript
+                )
+
+
+    # =====================================================
+    # VIDEO PROCESSING INFORMATION
+    # =====================================================
+
+    video_metadata = report.get(
+        "video_metadata"
+    )
+
+    if video_metadata:
+
+        st.write("")
+
+        with st.expander(
+            "⚙️ Analysis Details"
+        ):
+
+            metadata_col1, metadata_col2, metadata_col3 = (
+                st.columns(3)
+            )
+
+
+            with metadata_col1:
+
+                st.metric(
+                    "Original FPS",
+                    video_metadata.get(
+                        "original_fps",
+                        "N/A"
+                    )
+                )
+
+
+            with metadata_col2:
+
+                st.metric(
+                    "Analysis FPS",
+                    video_metadata.get(
+                        "analysis_fps",
+                        "N/A"
+                    )
+                )
+
+
+            with metadata_col3:
+
+                st.metric(
+                    "Frames Analyzed",
+                    video_metadata.get(
+                        "frames_analyzed",
+                        "N/A"
+                    )
+                )
+                
 # =========================================================
 # NAVBAR
 # =========================================================
@@ -226,7 +676,10 @@ st.markdown(
 if st.session_state.mode is None:
 
     # Hero Section
-    st.markdown("<h1 class='hero-title'>Master Your Presentation Skills</h1>", unsafe_allow_html=True)
+    st.markdown(
+        "<h1 class='hero-title'>Master Your Presentation Skills</h1>",
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "<p class='hero-subtitle'>"
         "Get instant, actionable feedback on visual delivery, speech pace, posture, and facial expressions powered by real-time computer vision."
@@ -239,11 +692,14 @@ if st.session_state.mode is None:
 
     with live_col:
         with st.container(border=True):
-            st.markdown("<div class='card-header'>🎥 Real-Time Practice</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='card-header'>🎥 Real-Time Practice</div>",
+                unsafe_allow_html=True,
+            )
             st.write(
                 "Connect your camera and mic to receive instant visual feedback while practicing live."
             )
-            
+
             st.markdown(
                 """
                 <div class="badge-grid">
@@ -255,7 +711,7 @@ if st.session_state.mode is None:
                 """,
                 unsafe_allow_html=True,
             )
-            
+
             st.caption("🔒 On-device processing • Complete privacy")
             st.write("")
 
@@ -265,11 +721,14 @@ if st.session_state.mode is None:
 
     with upload_col:
         with st.container(border=True):
-            st.markdown("<div class='card-header'>☁️ Video Recording Analysis</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='card-header'>☁️ Video Recording Analysis</div>",
+                unsafe_allow_html=True,
+            )
             st.write(
                 "Upload a pre-recorded presentation video to generate a comprehensive diagnostic report."
             )
-            
+
             st.markdown(
                 """
                 <div class="badge-grid">
@@ -282,7 +741,7 @@ if st.session_state.mode is None:
                 unsafe_allow_html=True,
             )
 
-            st.caption("🔒 Secure processing • Encrypted local upload")
+            st.caption("🔒 Local processing • Your recording stays private")
             st.write("")
 
             if st.button("Upload Recording →", key="upload_home", type="primary"):
@@ -298,7 +757,10 @@ if st.session_state.mode is None:
     features = [
         ("⚡ Multi-Modal", "Synchronized visual and audio intelligence processing."),
         ("🚀 Instant Metrics", "Immediate key performance breakdown after every run."),
-        ("🔐 Privacy First", "Your video and speech recordings are never saved remotely."),
+        (
+            "🔐 Privacy First",
+            "Your video and speech recordings are never saved remotely.",
+        ),
         ("🤖 AI Insights", "Turn raw analytical metrics into practical action steps."),
     ]
 
@@ -317,7 +779,10 @@ elif st.session_state.mode == "live":
     title_col, back_col = st.columns([5, 1])
 
     with title_col:
-        st.markdown("<h2 style='margin:0;'>🎥 Live Presentation Mode</h2>", unsafe_allow_html=True)
+        st.markdown(
+            "<h2 style='margin:0;'>🎥 Live Presentation Mode</h2>",
+            unsafe_allow_html=True,
+        )
         st.caption("Align your frame properly before initiating real-time feedback.")
 
     with back_col:
@@ -336,7 +801,9 @@ elif st.session_state.mode == "live":
                 "Position your web camera at eye level, ensure well-lit surrounding space, "
                 "and speak clearly into your primary microphone."
             )
-            st.info("💡 Keep your upper body and hands within frame to enable posture evaluation.")
+            st.info(
+                "💡 Keep your upper body and hands within frame to enable posture evaluation."
+            )
 
         with right:
             st.markdown("### Active Trackers")
@@ -346,7 +813,7 @@ elif st.session_state.mode == "live":
                 st.caption("Posture, Gestures, Gaze")
             with m2:
                 st.metric("Speech Indicators", "4 Metrics")
-                st.caption("Pace, Fillers, Tone, Clarity")
+                st.caption("Pace, Fillers, Pauses, Fluency")
 
     st.write("")
 
@@ -362,8 +829,12 @@ elif st.session_state.mode == "upload":
     title_col, back_col = st.columns([5, 1])
 
     with title_col:
-        st.markdown("<h2 style='margin:0;'>☁️ Upload Recording</h2>", unsafe_allow_html=True)
-        st.caption("Upload your recorded presentation for comprehensive delivery processing.")
+        st.markdown(
+            "<h2 style='margin:0;'>☁️ Upload Recording</h2>", unsafe_allow_html=True
+        )
+        st.caption(
+            "Upload your recorded presentation for comprehensive delivery processing."
+        )
 
     with back_col:
         if st.button("← Back", key="back_upload", type="secondary"):
@@ -390,21 +861,127 @@ elif st.session_state.mode == "upload":
         with info_col:
             with st.container(border=True):
                 st.markdown("### Analysis Pipeline")
-                st.write("Your recording will be processed through the following modules:")
-                st.markdown(
-                    """
+                st.write(
+                    "Your recording will be processed through the following modules:"
+                )
+                st.markdown("""
                     - **Posture & Frame Alignment**
                     - **Gesture Frequency Tracking**
                     - **Eye Contact Duration**
                     - **Speech Tempo & Filler Word Audit**
-                    """
-                )
+                    """)
 
         st.write("")
 
-        if st.button("Run Full Diagnostic Analysis →", key="analyze_upload", type="primary"):
-            st.info("Processing video framework pipeline...")
+        if st.button(
+            "Run Full Diagnostic Analysis →",
+            key="analyze_upload",
+            type="primary"
+        ):
 
+            st.session_state.analysis_report = None
+
+            # -----------------------------------------------------
+            # PRESERVE ORIGINAL FILE EXTENSION
+            # -----------------------------------------------------
+
+            _, extension = os.path.splitext(
+                uploaded_file.name
+            )
+
+            if not extension:
+                extension = ".mp4"
+
+
+            temp_video = (
+                tempfile.NamedTemporaryFile(
+                    suffix=extension,
+                    delete=False
+                )
+            )
+
+            temp_video_path = (
+                temp_video.name
+            )
+
+
+            try:
+
+                # -------------------------------------------------
+                # SAVE STREAMLIT UPLOAD LOCALLY
+                # -------------------------------------------------
+
+                temp_video.write(
+                    uploaded_file.getbuffer()
+                )
+
+                temp_video.close()
+
+
+                # -------------------------------------------------
+                # RUN REAL PRESENTAI PIPELINE
+                # -------------------------------------------------
+
+                with st.spinner(
+                    "Analyzing your presentation..."
+                ):
+
+                    report = analyze_video(
+                        temp_video_path,
+                        show_preview=False,
+                        target_analysis_fps=10.0,
+                    )
+
+
+                # -------------------------------------------------
+                # STORE RESULT
+                # -------------------------------------------------
+
+                st.session_state.analysis_report = (
+                    report
+                )
+
+
+                st.success(
+                    "Presentation analysis completed successfully."
+                )
+                                    
+            except Exception as error:
+
+                st.error(
+                    "Presentation analysis failed."
+                )
+
+                st.exception(
+                    error
+                )
+
+
+            finally:
+
+                # -------------------------------------------------
+                # REMOVE TEMP VIDEO
+                # -------------------------------------------------
+
+                if os.path.exists(
+                    temp_video_path
+                ):
+
+                    os.remove(
+                        temp_video_path
+                    )
+                    
+        # =================================================
+        # DISPLAY STORED REPORT
+        # =================================================
+        
+        if (st.session_state.analysis_report
+            is not None
+            ):
+            display_analysis_report(
+                st.session_state.analysis_report
+            )
+            
 # =========================================================
 # FOOTER
 # =========================================================
