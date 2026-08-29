@@ -1,148 +1,16 @@
 import cv2
 import time
-import mediapipe as mp
 
-from feature_extractor import extract_features
-from posture_scorer import PostureScorer
-from gesture_analyzer import GestureAnalyzer
-from gaze_analyzer import GazeAnalyzer
+from visual_analyzer import VisualAnalyzer
 from session_manager import SessionManager
 from speech_analyzer import SpeechAnalyzer
 
-# =========================================================
-# 1. MEDIAPIPE TASKS SETUP
-# =========================================================
-
-BaseOptions = mp.tasks.BaseOptions
-
-PoseLandmarker = mp.tasks.vision.PoseLandmarker
-PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-
-FaceLandmarker = mp.tasks.vision.FaceLandmarker
-FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
-
-RunningMode = mp.tasks.vision.RunningMode
-
 
 # =========================================================
-# MODEL PATHS
-# =========================================================
-
-POSE_MODEL_PATH = (
-    "models/pose_landmarker_lite.task"
-)
-
-FACE_MODEL_PATH = (
-    "models/face_landmarker.task"
-)
-
-
-# =========================================================
-# POSE DETECTOR CONFIGURATION
-# =========================================================
-
-pose_options = PoseLandmarkerOptions(
-    base_options=BaseOptions(
-        model_asset_path=POSE_MODEL_PATH
-    ),
-    running_mode=RunningMode.VIDEO,
-    num_poses=1,
-    min_pose_detection_confidence=0.5,
-    min_pose_presence_confidence=0.5,
-    min_tracking_confidence=0.5,
-)
-
-
-# =========================================================
-# FACE DETECTOR CONFIGURATION
-# =========================================================
-
-face_options = FaceLandmarkerOptions(
-    base_options=BaseOptions(
-        model_asset_path=FACE_MODEL_PATH
-    ),
-    running_mode=RunningMode.VIDEO,
-    num_faces=1,
-    min_face_detection_confidence=0.5,
-    min_face_presence_confidence=0.5,
-    min_tracking_confidence=0.5,
-)
-
-
-# =========================================================
-# CREATE DETECTORS
-# =========================================================
-
-pose_detector = (
-    PoseLandmarker.create_from_options(
-        pose_options
-    )
-)
-
-face_detector = (
-    FaceLandmarker.create_from_options(
-        face_options
-    )
-)
-
-
-# =========================================================
-# CREATE ANALYZERS
-# =========================================================
-
-posture_scorer = PostureScorer(
-    model_path="models/posture_classifier.pkl"
-)
-
-gesture_analyzer = GestureAnalyzer()
-
-gaze_analyzer = GazeAnalyzer()
-
-
-# =========================================================
-# CREATE SESSION MANAGER
-# =========================================================
-
-session_manager = SessionManager(
-    sample_interval=1.0
-)
-
-speech_analyzer = SpeechAnalyzer(
-    model_size="base.en",
-    device="cpu",
-    compute_type="int8",
-)
-
-session_manager.start_session()
-
-speech_analyzer.start()
-
-print()
-print("Presentation session started.")
-print("Speak normally while presenting.")
-print("Press Q to finish.")
-print()
-
-# =========================================================
-# 2. OPEN WEBCAM
-# =========================================================
-
-cap = cv2.VideoCapture(0)
-
-
-if not cap.isOpened():
-
-    raise RuntimeError(
-        "Could not open webcam."
-    )
-
-
-# =========================================================
-# 3. POSE CONNECTIONS
+# POSE CONNECTIONS - DISPLAY ONLY
 # =========================================================
 
 POSE_CONNECTIONS = [
-
     (0, 11),
     (0, 12),
 
@@ -168,279 +36,217 @@ POSE_CONNECTIONS = [
 
 
 # =========================================================
-# 4. LANDMARK SMOOTHING
+# CREATE SHARED VISUAL ANALYZER
 # =========================================================
 
-SMOOTHING_ALPHA = 0.25
+# Performance optimization:
+#
+# Pose:
+#   every 2 webcam frames
+#
+# Face:
+#   every 4 webcam frames
+
+visual_analyzer = VisualAnalyzer(
+    pose_every_n_frames=2,
+    face_every_n_frames=4,
+)
 
 
-smoothed_landmarks = None
+# =========================================================
+# SESSION MANAGER
+# =========================================================
 
-smoothed_world_landmarks = None
+session_manager = SessionManager(
+    sample_interval=1.0
+)
 
 
-def smooth_landmark_list(
-    raw_landmarks,
-    previous_landmarks,
-    alpha
-):
-    """
-    Smooth MediaPipe landmarks using
-    Exponential Moving Average.
-    """
+# =========================================================
+# SPEECH ANALYZER
+# =========================================================
 
-    if previous_landmarks is None:
+speech_analyzer = SpeechAnalyzer(
+    model_size="base.en",
+    device="cpu",
+    compute_type="int8",
+)
 
-        return [
-            [
-                landmark.x,
-                landmark.y,
-                landmark.z
+
+# =========================================================
+# OPEN WEBCAM
+# =========================================================
+
+cap = cv2.VideoCapture(0)
+
+
+if not cap.isOpened():
+
+    visual_analyzer.close()
+
+    raise RuntimeError(
+        "Could not open webcam."
+    )
+
+
+# =========================================================
+# START PRESENTATION SESSION
+# =========================================================
+
+session_manager.start_session()
+
+speech_analyzer.start()
+
+
+print()
+print(
+    "Presentation session started."
+)
+
+print(
+    "Speak normally while presenting."
+)
+
+print(
+    "Press Q to finish."
+)
+
+print()
+
+
+# =========================================================
+# MAIN WEBCAM LOOP
+# =========================================================
+
+try:
+
+    while cap.isOpened():
+
+        success, frame = (
+            cap.read()
+        )
+
+
+        if not success:
+
+            print(
+                "Could not access webcam."
+            )
+
+            break
+
+
+        # =================================================
+        # MIRROR WEBCAM
+        # =================================================
+
+        frame = cv2.flip(
+            frame,
+            1
+        )
+
+
+        # =================================================
+        # RGB CONVERSION
+        # =================================================
+
+        rgb_frame = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2RGB
+        )
+
+
+        # =================================================
+        # TIMESTAMP
+        # =================================================
+
+        timestamp_ms = (
+            time.monotonic_ns()
+            // 1_000_000
+        )
+
+
+        # =================================================
+        # SHARED VISUAL ANALYSIS
+        # =================================================
+
+        results = (
+            visual_analyzer.process_frame(
+                rgb_frame,
+                timestamp_ms
+            )
+        )
+
+
+        posture_result = (
+            results[
+                "posture_result"
             ]
-            for landmark in raw_landmarks
-        ]
+        )
 
+        gesture_result = (
+            results[
+                "gesture_result"
+            ]
+        )
 
-    for i, landmark in enumerate(
-        raw_landmarks
-    ):
+        gaze_result = (
+            results[
+                "gaze_result"
+            ]
+        )
 
-        previous_landmarks[i][0] = (
+        pose_landmarks = (
+            results[
+                "pose_landmarks"
+            ]
+        )
 
-            alpha
-            * landmark.x
-
-            + (
-                1 - alpha
-            )
-            * previous_landmarks[i][0]
+        face_landmarks = (
+            results[
+                "face_landmarks"
+            ]
         )
 
 
-        previous_landmarks[i][1] = (
+        # =================================================
+        # SESSION MANAGER
+        # =================================================
 
-            alpha
-            * landmark.y
-
-            + (
-                1 - alpha
-            )
-            * previous_landmarks[i][1]
+        session_manager.update_visual(
+            posture_result=posture_result,
+            gesture_result=gesture_result,
+            gaze_result=gaze_result,
         )
 
 
-        previous_landmarks[i][2] = (
-
-            alpha
-            * landmark.z
-
-            + (
-                1 - alpha
-            )
-            * previous_landmarks[i][2]
-        )
-
-
-    return previous_landmarks
-
-
-# =========================================================
-# 5. MAIN WEBCAM LOOP
-# =========================================================
-
-while cap.isOpened():
-
-    success, frame = cap.read()
-
-
-    if not success:
-
-        print(
-            "Could not access webcam."
-        )
-
-        break
-
-
-    # -----------------------------------------------------
-    # Results for this frame
-    # -----------------------------------------------------
-
-    posture_result = None
-    gesture_result = None
-    gaze_result = None
-
-
-    # -----------------------------------------------------
-    # Mirror image
-    # -----------------------------------------------------
-
-    frame = cv2.flip(
-        frame,
-        1
-    )
-
-
-    # -----------------------------------------------------
-    # Convert BGR -> RGB
-    # -----------------------------------------------------
-
-    rgb_frame = cv2.cvtColor(
-        frame,
-        cv2.COLOR_BGR2RGB
-    )
-
-
-    # -----------------------------------------------------
-    # Convert NumPy image -> MediaPipe Image
-    # -----------------------------------------------------
-
-    mp_image = mp.Image(
-        image_format=mp.ImageFormat.SRGB,
-        data=rgb_frame
-    )
-
-
-    # -----------------------------------------------------
-    # VIDEO mode requires increasing timestamp
-    # -----------------------------------------------------
-
-    timestamp_ms = (
-        time.monotonic_ns()
-        // 1_000_000
-    )
-
-
-    # =====================================================
-    # RUN MEDIAPIPE
-    # =====================================================
-
-    pose_results = (
-        pose_detector.detect_for_video(
-            mp_image,
-            timestamp_ms
-        )
-    )
-
-
-    face_results = (
-        face_detector.detect_for_video(
-            mp_image,
-            timestamp_ms
-        )
-    )
-
-
-    # =====================================================
-    # PROCESS POSE
-    # =====================================================
-
-    if (
-        pose_results.pose_landmarks
-        and pose_results.pose_world_landmarks
-    ):
-
-        raw_landmarks = (
-            pose_results.pose_landmarks[0]
-        )
-
-
-        raw_world_landmarks = (
-            pose_results.pose_world_landmarks[0]
-        )
-
+        # =================================================
+        # FRAME SIZE
+        # =================================================
 
         height, width, _ = (
             frame.shape
         )
 
 
-        # -------------------------------------------------
-        # Smooth image landmarks
-        # -------------------------------------------------
-
-        smoothed_landmarks = (
-            smooth_landmark_list(
-
-                raw_landmarks,
-
-                smoothed_landmarks,
-
-                SMOOTHING_ALPHA
-            )
-        )
-
-
-        # -------------------------------------------------
-        # Smooth world landmarks
-        # -------------------------------------------------
-
-        smoothed_world_landmarks = (
-            smooth_landmark_list(
-
-                raw_world_landmarks,
-
-                smoothed_world_landmarks,
-
-                SMOOTHING_ALPHA
-            )
-        )
-
-
         # =================================================
-        # FACE IS OPTIONAL
+        # POSTURE DISPLAY
         # =================================================
 
-        face_landmarks = None
-
-
-        if face_results.face_landmarks:
-
-            face_landmarks = (
-                face_results.face_landmarks[0]
-            )
-
-
-        # =================================================
-        # EXTRACT ML FEATURES
-        # =================================================
-
-        features = extract_features(
-
-            smoothed_landmarks,
-
-            smoothed_world_landmarks,
-
-            face_landmarks
-        )
-
-
-        # =================================================
-        # ML POSTURE SCORING
-        # =================================================
-
-        if features is not None:
-
-            posture_result = (
-                posture_scorer.update(
-                    features
-                )
-            )
-
+        if posture_result is not None:
 
             display_score = (
-                posture_result["score"]
+                posture_result[
+                    "score"
+                ]
             )
-
 
             display_status = (
-                posture_result["status"]
+                posture_result[
+                    "status"
+                ]
             )
 
-
-            # ---------------------------------------------
-            # Display color
-            # ---------------------------------------------
 
             if (
                 display_status
@@ -487,84 +293,145 @@ while cap.isOpened():
                 )
 
 
-            # =================================================
-            # GESTURE ANALYSIS
-            # =================================================
+            cv2.putText(
+                frame,
+                (
+                    f"Posture: "
+                    f"{display_status} "
+                    f"({display_score}/100)"
+                ),
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.75,
+                score_color,
+                2,
+            )
 
-            gesture_result = (
-                gesture_analyzer.update(
-                    smoothed_landmarks
+
+            cv2.putText(
+                frame,
+                (
+                    "ML Good Confidence: "
+                    f"{posture_result['good_probability']:.2f}"
+                ),
+                (20, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+            )
+
+
+        # =================================================
+        # GESTURE DISPLAY
+        # =================================================
+
+        if gesture_result is not None:
+
+            cv2.putText(
+                frame,
+                (
+                    f"Gestures: "
+                    f"{gesture_result['status']} "
+                    f"({gesture_result['score']}/100)"
+                ),
+                (20, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 255, 0),
+                2,
+            )
+
+
+            feedback = (
+                gesture_result.get(
+                    "feedback"
                 )
             )
 
 
-            if gesture_result is not None:
+            if feedback:
 
-                cv2.putText(
-                    frame,
-                    (
-                        f"Gestures: "
-                        f"{gesture_result['status']} "
-                        f"({gesture_result['score']}/100)"
-                    ),
-                    (20, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.65,
-                    (255, 255, 0),
-                    2,
-                )
+                if isinstance(
+                    feedback,
+                    list
+                ):
 
+                    feedback_text = (
+                        feedback[0]
+                    )
 
-                if gesture_result[
-                    "feedback"
-                ]:
+                else:
 
-                    cv2.putText(
-                        frame,
-                        gesture_result[
-                            "feedback"
-                        ][0],
-                        (20, 130),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        1,
+                    feedback_text = (
+                        str(
+                            feedback
+                        )
                     )
 
 
-            # =================================================
-            # GAZE / EYE-CONTACT ANALYSIS
-            # =================================================
+                cv2.putText(
+                    frame,
+                    feedback_text,
+                    (20, 130),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    1,
+                )
 
-            gaze_result = (
-                gaze_analyzer.update(
-                    face_landmarks
+
+        # =================================================
+        # GAZE DISPLAY
+        # =================================================
+
+        if gaze_result is not None:
+
+            cv2.putText(
+                frame,
+                (
+                    f"Eye Contact: "
+                    f"{gaze_result['status']} "
+                    f"({gaze_result['score']}/100)"
+                ),
+                (20, 160),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 200, 0),
+                2,
+            )
+
+
+            feedback = (
+                gaze_result.get(
+                    "feedback"
                 )
             )
 
 
-            if gaze_result is not None:
+            if feedback:
+
+                if isinstance(
+                    feedback,
+                    list
+                ):
+
+                    feedback_text = (
+                        feedback[0]
+                    )
+
+                else:
+
+                    feedback_text = (
+                        str(
+                            feedback
+                        )
+                    )
+
 
                 cv2.putText(
                     frame,
-                    (
-                        f"Eye Contact: "
-                        f"{gaze_result['status']} "
-                        f"({gaze_result['score']}/100)"
-                    ),
-                    (20, 160),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.65,
-                    (255, 200, 0),
-                    2,
-                )
-
-
-                cv2.putText(
-                    frame,
-                    gaze_result[
-                        "feedback"
-                    ],
+                    feedback_text,
                     (20, 190),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
@@ -573,171 +440,98 @@ while cap.isOpened():
                 )
 
 
-            # =================================================
-            # SESSION MANAGER
-            # =================================================
-
-            session_manager.update_visual(
-                posture_result=posture_result,
-                gesture_result=gesture_result,
-                gaze_result=gaze_result,
-            )
-
-
-            # =================================================
-            # MAIN POSTURE SCORE
-            # =================================================
-
-            cv2.putText(
-
-                frame,
-
-                (
-                    f"Posture: "
-                    f"{display_status} "
-                    f"({display_score}/100)"
-                ),
-
-                (20, 40),
-
-                cv2.FONT_HERSHEY_SIMPLEX,
-
-                0.75,
-
-                score_color,
-
-                2
-            )
-
-
-            # =================================================
-            # ML CONFIDENCE
-            # =================================================
-
-            cv2.putText(
-
-                frame,
-
-                (
-                    f"ML Good Confidence: "
-                    f"{posture_result['good_probability']:.2f}"
-                ),
-
-                (20, 70),
-
-                cv2.FONT_HERSHEY_SIMPLEX,
-
-                0.5,
-
-                (255, 255, 255),
-
-                1
-            )
-
-
         # =================================================
-        # DRAW POSE LANDMARKS
+        # DRAW POSE
         # =================================================
 
-        for landmark in smoothed_landmarks:
+        if pose_landmarks is not None:
 
-            x = int(
-                landmark[0]
-                * width
-            )
+            for landmark in (
+                pose_landmarks
+            ):
 
-            y = int(
-                landmark[1]
-                * height
-            )
-
-
-            cv2.circle(
-
-                frame,
-
-                (x, y),
-
-                4,
-
-                (0, 255, 0),
-
-                -1
-            )
-
-
-        # =================================================
-        # DRAW POSE SKELETON
-        # =================================================
-
-        for (
-            start_index,
-            end_index
-        ) in POSE_CONNECTIONS:
-
-            start = (
-                smoothed_landmarks[
-                    start_index
-                ]
-            )
-
-            end = (
-                smoothed_landmarks[
-                    end_index
-                ]
-            )
-
-
-            start_point = (
-
-                int(
-                    start[0]
+                x = int(
+                    landmark[0]
                     * width
-                ),
+                )
 
-                int(
-                    start[1]
+                y = int(
+                    landmark[1]
                     * height
                 )
-            )
 
 
-            end_point = (
-
-                int(
-                    end[0]
-                    * width
-                ),
-
-                int(
-                    end[1]
-                    * height
+                cv2.circle(
+                    frame,
+                    (x, y),
+                    4,
+                    (0, 255, 0),
+                    -1,
                 )
-            )
 
 
-            cv2.line(
+            # ---------------------------------------------
+            # Skeleton
+            # ---------------------------------------------
 
-                frame,
+            for (
+                start_index,
+                end_index
+            ) in POSE_CONNECTIONS:
 
-                start_point,
+                start = (
+                    pose_landmarks[
+                        start_index
+                    ]
+                )
 
-                end_point,
+                end = (
+                    pose_landmarks[
+                        end_index
+                    ]
+                )
 
-                (255, 255, 255),
 
-                2
-            )
+                start_point = (
+                    int(
+                        start[0]
+                        * width
+                    ),
+                    int(
+                        start[1]
+                        * height
+                    ),
+                )
+
+
+                end_point = (
+                    int(
+                        end[0]
+                        * width
+                    ),
+                    int(
+                        end[1]
+                        * height
+                    ),
+                )
+
+
+                cv2.line(
+                    frame,
+                    start_point,
+                    end_point,
+                    (255, 255, 255),
+                    2,
+                )
 
 
         # =================================================
-        # OPTIONAL FACE LANDMARK DRAWING
+        # DRAW IMPORTANT FACE POINTS
         # =================================================
 
         if face_landmarks is not None:
 
             important_face_points = [
-
                 1,
                 10,
                 152,
@@ -769,84 +563,76 @@ while cap.isOpened():
 
 
                 cv2.circle(
-
                     frame,
-
                     (x, y),
-
                     3,
-
                     (0, 255, 255),
-
-                    -1
+                    -1,
                 )
 
 
-    # =====================================================
-    # NO PERSON DETECTED
-    # =====================================================
+        # =================================================
+        # NO POSE
+        # =================================================
 
-    else:
+        if pose_landmarks is None:
 
-        smoothed_landmarks = None
-
-        smoothed_world_landmarks = None
-
-
-        # Clear score history so an old score
-        # does not carry over when person returns.
-        posture_scorer.reset()
-
-        gesture_analyzer.reset()
-
-        gaze_analyzer.reset()
+            cv2.putText(
+                frame,
+                "No pose detected",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 255),
+                2,
+            )
 
 
-        cv2.putText(
+        # =================================================
+        # DISPLAY
+        # =================================================
 
-            frame,
-
-            "No pose detected",
-
-            (20, 40),
-
-            cv2.FONT_HERSHEY_SIMPLEX,
-
-            0.7,
-
-            (0, 0, 255),
-
-            2
+        cv2.imshow(
+            (
+                "PresentAI Coach - "
+                "Live Presentation"
+            ),
+            frame
         )
 
 
-    # =====================================================
-    # 6. DISPLAY WINDOW
-    # =====================================================
+        # =================================================
+        # QUIT
+        # =================================================
 
-    cv2.imshow(
+        if (
+            cv2.waitKey(1)
+            & 0xFF
+            == ord("q")
+        ):
 
-        "PresentAI Coach - Pose Detection",
-
-        frame
-    )
-
-
-    # Press Q to quit
-    if (
-        cv2.waitKey(1)
-        & 0xFF
-        == ord("q")
-    ):
-
-        break
+            break
 
 
 # =========================================================
-# 7. STOP SPEECH RECORDING
+# CLEAN UP VISUAL RESOURCES
+# =========================================================
+
+finally:
+
+    cap.release()
+
+    cv2.destroyAllWindows()
+
+    visual_analyzer.close()
+
+
+# =========================================================
+# STOP SPEECH
 # =========================================================
 
 speech_analyzer.stop()
+
 
 print()
 print(
@@ -859,10 +645,11 @@ print(
 
 
 # =========================================================
-# 8. TRANSCRIBE SPEECH
+# TRANSCRIBE MICROPHONE AUDIO
 # =========================================================
 
 speech_analyzer.transcribe()
+
 
 speech_result = (
     speech_analyzer.get_metrics()
@@ -870,7 +657,7 @@ speech_result = (
 
 
 # =========================================================
-# 9. ADD SPEECH TO SESSION
+# ADD SPEECH TO SESSION
 # =========================================================
 
 session_manager.set_speech_result(
@@ -879,7 +666,7 @@ session_manager.set_speech_result(
 
 
 # =========================================================
-# 10. GENERATE FINAL REPORT
+# FINAL REPORT
 # =========================================================
 
 final_report = (
@@ -888,7 +675,7 @@ final_report = (
 
 
 # =========================================================
-# 11. DISPLAY FINAL REPORT
+# PRINT REPORT
 # =========================================================
 
 print()
@@ -907,10 +694,29 @@ print(
 print()
 
 
-print(
-    f"Overall Score: "
-    f"{final_report['overall_score']}/100"
-)
+# ---------------------------------------------------------
+# OVERALL
+# ---------------------------------------------------------
+
+if (
+    final_report[
+        "overall_score"
+    ]
+    is None
+):
+
+    print(
+        "Overall Score: "
+        "Not Available"
+    )
+
+else:
+
+    print(
+        f"Overall Score: "
+        f"{final_report['overall_score']}/100"
+    )
+
 
 print(
     f"Status: "
@@ -921,18 +727,26 @@ print()
 
 
 # ---------------------------------------------------------
-# DIMENSION SCORES
+# DIMENSIONS
 # ---------------------------------------------------------
 
 print(
     "Dimension Scores:"
 )
 
+
 dimension_labels = {
-    "posture": "Posture",
-    "gesture": "Gestures",
-    "gaze": "Eye Contact",
-    "speech": "Speech Delivery",
+    "posture":
+        "Posture",
+
+    "gesture":
+        "Gestures",
+
+    "gaze":
+        "Eye Contact",
+
+    "speech":
+        "Speech Delivery",
 }
 
 
@@ -943,10 +757,13 @@ for (
     "dimension_scores"
 ].items():
 
-    label = dimension_labels.get(
-        dimension,
-        dimension
+    label = (
+        dimension_labels.get(
+            dimension,
+            dimension
+        )
     )
+
 
     if score is None:
 
@@ -968,18 +785,20 @@ for (
 # ---------------------------------------------------------
 
 print()
-
 print(
     "Strengths:"
 )
+
 
 if final_report[
     "strengths"
 ]:
 
-    for strength in final_report[
-        "strengths"
-    ]:
+    for strength in (
+        final_report[
+            "strengths"
+        ]
+    ):
 
         print(
             f"- {strength}"
@@ -997,18 +816,20 @@ else:
 # ---------------------------------------------------------
 
 print()
-
 print(
     "Improvement Areas:"
 )
+
 
 if final_report[
     "improvement_areas"
 ]:
 
-    for area in final_report[
-        "improvement_areas"
-    ]:
+    for area in (
+        final_report[
+            "improvement_areas"
+        ]
+    ):
 
         print(
             f"- {area}"
@@ -1026,14 +847,16 @@ else:
 # ---------------------------------------------------------
 
 print()
-
 print(
     "Recommendations:"
 )
 
-for recommendation in final_report[
-    "recommendations"
-]:
+
+for recommendation in (
+    final_report[
+        "recommendations"
+    ]
+):
 
     print(
         f"- {recommendation}"
@@ -1041,14 +864,14 @@ for recommendation in final_report[
 
 
 # ---------------------------------------------------------
-# SPEECH DETAILS
+# SPEECH
 # ---------------------------------------------------------
 
 print()
-
 print(
     "Speech Analysis:"
 )
+
 
 print(
     f"- Words: "
@@ -1096,7 +919,6 @@ print(
 # ---------------------------------------------------------
 
 print()
-
 print(
     "Visual Samples:"
 )
@@ -1113,10 +935,10 @@ print(
 # ---------------------------------------------------------
 
 print()
-
 print(
     "Transcript:"
 )
+
 
 if speech_result[
     "transcript"
@@ -1134,20 +956,8 @@ else:
         "No speech recognized."
     )
 
-print()
 
+print()
 print(
     "===================================="
 )
-
-# =========================================================
-# 12. CLEANUP
-# =========================================================
-
-cap.release()
-
-cv2.destroyAllWindows()
-
-pose_detector.close()
-
-face_detector.close()
