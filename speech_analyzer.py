@@ -217,121 +217,147 @@ class SpeechAnalyzer:
 
         return temp_path
 
+    def _transcribe_audio_path(
+        self,
+        audio_path):
+        self.words.clear()
+        self.word_records.clear()
+        self.transcript_segments.clear()
 
+        if (
+            not audio_path
+            or
+            not os.path.exists(
+                audio_path
+            )
+        ):
+            return ""
+
+        print(
+            "\nTranscribing speech..."
+        )
+
+        segments, info = (
+            self.model.transcribe(
+                audio_path,
+                language="en",
+                beam_size=5,
+                vad_filter=True,
+                word_timestamps=True,
+            )
+        )
+
+
+        for segment in segments:
+            text = (
+                segment.text.strip()
+            )
+
+            if text:
+
+                self.transcript_segments.append(
+                    text
+                )
+
+
+            if segment.words is None:
+                continue
+
+
+            for word_info in segment.words:
+
+                word = (
+                    word_info.word
+                    .lower()
+                    .strip()
+                    .strip(
+                        ".,!?;:\"'()[]{}"
+                    )
+                )
+
+                if not word:
+                    continue
+
+
+                start = float(
+                    word_info.start
+                )
+
+                end = float(
+                    word_info.end
+                )
+
+
+                probability = getattr(
+                    word_info,
+                    "probability",
+                    0.0
+                )
+
+
+                if probability is None:
+
+                    probability = 0.0
+
+
+                self.words.append(
+                    word
+                )
+
+
+                self.word_records.append({
+                    "word":
+                        word,
+
+                    "start":
+                        start,
+
+                    "end":
+                        end,
+
+                    "confidence":
+                        float(
+                            probability
+                        ),
+                })
+
+
+        print(
+            "Transcription complete."
+            )
+
+
+        return " ".join(
+            self.transcript_segments
+        )
+    
     # =====================================================
     # TRANSCRIPTION
     # =====================================================
 
     def transcribe(self):
         """
-        Transcribe recorded audio using Faster-Whisper.
-
-        Returns:
-            transcript string
+            Transcribe microphone recording.
         """
-
-        self.words.clear()
-        self.word_records.clear()
-        self.transcript_segments.clear()
-
-        audio_path = self._save_temp_audio()
+        audio_path = (
+            self._save_temp_audio()
+    )
 
         if audio_path is None:
             return ""
 
         try:
 
-            print(
-                "\nTranscribing speech..."
-            )
-
-            segments, info = self.model.transcribe(
-                audio_path,
-
-                language="en",
-
-                beam_size=5,
-
-                vad_filter=True,
-
-                word_timestamps=True,
-            )
-
-            # Faster-Whisper returns a generator.
-            for segment in segments:
-
-                text = (
-                    segment.text
-                    .strip()
+            return (
+                self._transcribe_audio_path(
+                    audio_path
                 )
-
-                if text:
-
-                    self.transcript_segments.append(
-                        text
-                    )
-
-                if segment.words is None:
-                    continue
-
-                for word_info in segment.words:
-
-                    word = (
-                        word_info.word
-                        .lower()
-                        .strip()
-                        .strip(
-                            ".,!?;:\"'()[]{}"
-                        )
-                    )
-
-                    if not word:
-                        continue
-
-                    start = float(
-                        word_info.start
-                    )
-
-                    end = float(
-                        word_info.end
-                    )
-
-                    probability = getattr(
-                        word_info,
-                        "probability",
-                        0.0
-                    )
-
-                    if probability is None:
-                        probability = 0.0
-
-                    self.words.append(
-                        word
-                    )
-
-                    self.word_records.append({
-                        "word": word,
-                        "start": start,
-                        "end": end,
-                        "confidence": float(
-                            probability
-                        ),
-                    })
-
-            print(
-                "Transcription complete."
-            )
-
-            return " ".join(
-                self.transcript_segments
             )
 
         finally:
 
-            # Delete temporary audio file.
             if (
-                audio_path
-                and os.path.exists(
+                os.path.exists(
                     audio_path
                 )
             ):
@@ -340,7 +366,27 @@ class SpeechAnalyzer:
                     audio_path
                 )
 
+    # =====================================================
+    # TRANSCRIBE EXISTING AUDIO FILE
+    # =====================================================
 
+    def transcribe_file(
+        self,
+        audio_path
+    ):
+        """
+        Transcribe an existing audio file.
+
+        Used by uploaded presentation videos.
+        """
+
+        return (
+            self._transcribe_audio_path(
+                audio_path
+            )
+        )
+    
+    
     # =====================================================
     # FILLER ANALYSIS
     # =====================================================

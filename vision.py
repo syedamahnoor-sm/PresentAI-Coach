@@ -7,7 +7,7 @@ from posture_scorer import PostureScorer
 from gesture_analyzer import GestureAnalyzer
 from gaze_analyzer import GazeAnalyzer
 from session_manager import SessionManager
-
+from speech_analyzer import SpeechAnalyzer
 
 # =========================================================
 # 1. MEDIAPIPE TASKS SETUP
@@ -107,8 +107,21 @@ session_manager = SessionManager(
     sample_interval=1.0
 )
 
+speech_analyzer = SpeechAnalyzer(
+    model_size="base.en",
+    device="cpu",
+    compute_type="int8",
+)
+
 session_manager.start_session()
 
+speech_analyzer.start()
+
+print()
+print("Presentation session started.")
+print("Speak normally while presenting.")
+print("Press Q to finish.")
+print()
 
 # =========================================================
 # 2. OPEN WEBCAM
@@ -830,56 +843,305 @@ while cap.isOpened():
 
 
 # =========================================================
-# 7. END VISUAL SESSION
+# 7. STOP SPEECH RECORDING
 # =========================================================
 
-visual_report = (
+speech_analyzer.stop()
+
+print()
+print(
+    "Presentation finished."
+)
+
+print(
+    "Analyzing speech..."
+)
+
+
+# =========================================================
+# 8. TRANSCRIBE SPEECH
+# =========================================================
+
+speech_analyzer.transcribe()
+
+speech_result = (
+    speech_analyzer.get_metrics()
+)
+
+
+# =========================================================
+# 9. ADD SPEECH TO SESSION
+# =========================================================
+
+session_manager.set_speech_result(
+    speech_result
+)
+
+
+# =========================================================
+# 10. GENERATE FINAL REPORT
+# =========================================================
+
+final_report = (
     session_manager.end_session()
 )
 
 
+# =========================================================
+# 11. DISPLAY FINAL REPORT
+# =========================================================
+
 print()
 print(
     "===================================="
 )
+
 print(
-    "VISUAL SESSION SUMMARY"
+    "PRESENTAI FINAL PRESENTATION REPORT"
 )
+
 print(
     "===================================="
 )
 
+print()
+
 
 print(
-    f"Posture: "
-    f"{visual_report['dimension_scores'].get('posture')}"
+    f"Overall Score: "
+    f"{final_report['overall_score']}/100"
 )
 
 print(
-    f"Gestures: "
-    f"{visual_report['dimension_scores'].get('gesture')}"
+    f"Status: "
+    f"{final_report['status']}"
 )
-
-print(
-    f"Eye Contact: "
-    f"{visual_report['dimension_scores'].get('gaze')}"
-)
-
 
 print()
+
+
+# ---------------------------------------------------------
+# DIMENSION SCORES
+# ---------------------------------------------------------
+
+print(
+    "Dimension Scores:"
+)
+
+dimension_labels = {
+    "posture": "Posture",
+    "gesture": "Gestures",
+    "gaze": "Eye Contact",
+    "speech": "Speech Delivery",
+}
+
+
+for (
+    dimension,
+    score
+) in final_report[
+    "dimension_scores"
+].items():
+
+    label = dimension_labels.get(
+        dimension,
+        dimension
+    )
+
+    if score is None:
+
+        print(
+            f"- {label}: "
+            "Not Available"
+        )
+
+    else:
+
+        print(
+            f"- {label}: "
+            f"{score}/100"
+        )
+
+
+# ---------------------------------------------------------
+# STRENGTHS
+# ---------------------------------------------------------
+
+print()
+
+print(
+    "Strengths:"
+)
+
+if final_report[
+    "strengths"
+]:
+
+    for strength in final_report[
+        "strengths"
+    ]:
+
+        print(
+            f"- {strength}"
+        )
+
+else:
+
+    print(
+        "- None identified"
+    )
+
+
+# ---------------------------------------------------------
+# IMPROVEMENT AREAS
+# ---------------------------------------------------------
+
+print()
+
+print(
+    "Improvement Areas:"
+)
+
+if final_report[
+    "improvement_areas"
+]:
+
+    for area in final_report[
+        "improvement_areas"
+    ]:
+
+        print(
+            f"- {area}"
+        )
+
+else:
+
+    print(
+        "- None"
+    )
+
+
+# ---------------------------------------------------------
+# RECOMMENDATIONS
+# ---------------------------------------------------------
+
+print()
+
+print(
+    "Recommendations:"
+)
+
+for recommendation in final_report[
+    "recommendations"
+]:
+
+    print(
+        f"- {recommendation}"
+    )
+
+
+# ---------------------------------------------------------
+# SPEECH DETAILS
+# ---------------------------------------------------------
+
+print()
+
+print(
+    "Speech Analysis:"
+)
+
+print(
+    f"- Words: "
+    f"{speech_result['word_count']}"
+)
+
+print(
+    f"- WPM: "
+    f"{speech_result['wpm']}"
+)
+
+print(
+    f"- Fillers: "
+    f"{speech_result['filler_count']}"
+)
+
+print(
+    f"- Filler Rate: "
+    f"{speech_result['filler_rate']}%"
+)
+
+print(
+    f"- Pauses: "
+    f"{speech_result['pause_count']}"
+)
+
+print(
+    f"- Long Pauses: "
+    f"{speech_result['long_pause_count']}"
+)
+
+print(
+    f"- Fluency: "
+    f"{speech_result['fluency_score']}/100"
+)
+
+print(
+    f"- Recognition Confidence: "
+    f"{speech_result['recognition_confidence']}"
+)
+
+
+# ---------------------------------------------------------
+# VISUAL SAMPLE INFORMATION
+# ---------------------------------------------------------
+
+print()
+
 print(
     "Visual Samples:"
 )
 
 print(
-    visual_report[
+    final_report[
         "visual_samples"
     ]
 )
 
 
+# ---------------------------------------------------------
+# TRANSCRIPT
+# ---------------------------------------------------------
+
+print()
+
+print(
+    "Transcript:"
+)
+
+if speech_result[
+    "transcript"
+]:
+
+    print(
+        speech_result[
+            "transcript"
+        ]
+    )
+
+else:
+
+    print(
+        "No speech recognized."
+    )
+
+print()
+
+print(
+    "===================================="
+)
+
 # =========================================================
-# 8. CLEANUP
+# 12. CLEANUP
 # =========================================================
 
 cap.release()
