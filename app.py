@@ -1,8 +1,13 @@
-import streamlit as st
-import tempfile
 import os
+import tempfile
+
+import streamlit as st
+
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 
 from video_analyzer import analyze_video
+from live_analyzer import LivePresentationAnalyzer
+
 # =========================================================
 # PAGE CONFIG
 # =========================================================
@@ -197,6 +202,12 @@ if "mode" not in st.session_state:
 
 if "analysis_report" not in st.session_state:
     st.session_state.analysis_report = None
+
+if "live_analyzer" not in st.session_state:
+    st.session_state.live_analyzer = None
+
+if "live_report" not in st.session_state:
+    st.session_state.live_report = None
     
 # =========================================================
 # ANALYSIS RESULTS UI
@@ -817,8 +828,252 @@ elif st.session_state.mode == "live":
 
     st.write("")
 
-    if st.button("Initialize Camera & Begin →", key="start_live", type="primary"):
-        st.info("Live streaming pipeline target connected.")
+        # =====================================================
+    # LIVE ANALYZER INITIALIZATION
+    # =====================================================
+
+    if st.session_state.live_analyzer is None:
+
+        st.session_state.live_analyzer = (
+            LivePresentationAnalyzer()
+        )
+
+
+    live_analyzer = (
+        st.session_state.live_analyzer
+    )
+
+
+    # =====================================================
+    # START PRESENTATION
+    # =====================================================
+
+    if not live_analyzer.session_started:
+
+        if st.button(
+            "Initialize Camera & Begin →",
+            key="start_live",
+            type="primary",
+        ):
+
+            st.session_state.live_report = None
+
+            try:
+
+                live_analyzer.start_session()
+
+                st.rerun()
+
+            except Exception as error:
+
+                st.error(
+                    "Could not start live presentation."
+                )
+
+                st.exception(
+                    error
+                )
+
+
+    # =====================================================
+    # WEBRTC CAMERA
+    # =====================================================
+
+    if live_analyzer.session_started:
+
+        st.write("")
+
+        st.success(
+            "Live presentation session is active."
+        )
+
+        st.caption(
+            "Present naturally. Your posture, gestures, "
+            "eye contact and speech are being analyzed."
+        )
+
+
+        webrtc_ctx = webrtc_streamer(
+            key="presentai-live-camera",
+
+            mode=WebRtcMode.SENDRECV,
+
+            video_frame_callback=live_analyzer.process_frame,
+
+            media_stream_constraints={
+                "video": True,
+                "audio": False,
+            },
+
+            rtc_configuration={
+                "iceServers": [
+                    {
+                        "urls": [
+                            "stun:stun.l.google.com:19302"
+                        ]
+                    }
+                ]
+            },
+
+            async_processing=True,
+        )
+
+
+        st.write("")
+
+
+        # =================================================
+        # CURRENT METRICS
+        # =================================================
+
+        latest = (
+            live_analyzer.get_latest_results()
+        )
+
+
+        posture_result = latest.get(
+            "posture_result"
+        )
+
+        gesture_result = latest.get(
+            "gesture_result"
+        )
+
+        gaze_result = latest.get(
+            "gaze_result"
+        )
+
+
+        live_col1, live_col2, live_col3 = (
+            st.columns(3)
+        )
+
+
+        with live_col1:
+
+            posture_score = (
+                posture_result.get(
+                    "score"
+                )
+                if posture_result
+                else "Waiting..."
+            )
+
+            st.metric(
+                "🧍 Posture",
+                (
+                    f"{posture_score}/100"
+                    if posture_result
+                    else posture_score
+                )
+            )
+
+
+        with live_col2:
+
+            gesture_score = (
+                gesture_result.get(
+                    "score"
+                )
+                if gesture_result
+                else "Waiting..."
+            )
+
+            st.metric(
+                "👋 Gestures",
+                (
+                    f"{gesture_score}/100"
+                    if gesture_result
+                    else gesture_score
+                )
+            )
+
+
+        with live_col3:
+
+            gaze_score = (
+                gaze_result.get(
+                    "score"
+                )
+                if gaze_result
+                else "Waiting..."
+            )
+
+            st.metric(
+                "👁️ Eye Contact",
+                (
+                    f"{gaze_score}/100"
+                    if gaze_result
+                    else gaze_score
+                )
+            )
+
+
+        # =================================================
+        # END PRESENTATION
+        # =================================================
+
+        st.write("")
+
+
+        if st.button(
+            "■ Finish Presentation & Analyze →",
+            key="finish_live",
+            type="primary",
+        ):
+
+            try:
+
+                with st.spinner(
+                    "Finalizing presentation and analyzing speech..."
+                ):
+
+                    report = (
+                        live_analyzer.finish_session()
+                    )
+
+
+                if report is not None:
+
+                    st.session_state.live_report = (
+                        report
+                    )
+
+                    st.session_state.analysis_report = (
+                        report
+                    )
+
+
+                st.success(
+                    "Live presentation analysis completed."
+                )
+
+                st.rerun()
+
+
+            except Exception as error:
+
+                st.error(
+                    "Could not finalize live presentation."
+                )
+
+                st.exception(
+                    error
+                )
+
+
+    # =====================================================
+    # DISPLAY FINAL LIVE REPORT
+    # =====================================================
+
+    if (
+        st.session_state.live_report
+        is not None
+    ):
+
+        display_analysis_report(
+            st.session_state.live_report
+        )
 
 # =========================================================
 # UPLOAD PRESENTATION PAGE
@@ -838,7 +1093,16 @@ elif st.session_state.mode == "upload":
 
     with back_col:
         if st.button("← Back", key="back_upload", type="secondary"):
+            if (
+                st.session_state.live_analyzer
+                is not None
+            ):
+                st.session_state.live_analyzer.close()
+
+            st.session_state.live_analyzer = None
+            st.session_state.live_report = None
             st.session_state.mode = None
+
             st.rerun()
 
     st.write("")

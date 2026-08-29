@@ -9,3 +9,5 @@ faster-whisper
 scipy
 sounddevice
 streamlit
+streamlit-webrtc
+av
