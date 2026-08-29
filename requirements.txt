@@ -11,3 +11,8 @@ sounddevice
 streamlit
 streamlit-webrtc
 av
+langgraph
+langchain
+langchain-google-genai
+python-dotenv
+pydantic

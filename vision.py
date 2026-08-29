@@ -5,7 +5,6 @@ from visual_analyzer import VisualAnalyzer
 from session_manager import SessionManager
 from speech_analyzer import SpeechAnalyzer
 
-
 # =========================================================
 # POSE CONNECTIONS - DISPLAY ONLY
 # =========================================================
