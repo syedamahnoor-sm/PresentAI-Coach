@@ -8,3 +8,4 @@ joblib
 faster-whisper
 scipy
 sounddevice
+streamlit
