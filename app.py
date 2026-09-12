@@ -2,12 +2,78 @@ import os
 import tempfile
 
 import streamlit as st
+from dotenv import load_dotenv
 
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
 
 from video_analyzer import analyze_video
 from live_analyzer import LivePresentationAnalyzer
 from ai_coach_agent import AICoachAgent
+
+# Load local environment variables from .env when available.
+# On Streamlit Cloud, TURN credentials can also be read from st.secrets.
+load_dotenv()
+
+
+def get_rtc_configuration():
+    """
+    Build the WebRTC ICE configuration.
+
+    Local development:
+        TURN_USERNAME / TURN_CREDENTIAL are read from .env.
+
+    Streamlit Cloud:
+        If environment variables are unavailable, the same names are
+        read from Streamlit Secrets.
+    """
+
+    turn_username = os.getenv("TURN_USERNAME")
+    turn_credential = os.getenv("TURN_CREDENTIAL")
+
+    if not turn_username or not turn_credential:
+        try:
+            turn_username = st.secrets["TURN_USERNAME"]
+            turn_credential = st.secrets["TURN_CREDENTIAL"]
+        except Exception:
+            pass
+
+    # Fallback to STUN-only if TURN credentials are unavailable.
+    if not turn_username or not turn_credential:
+        return {
+            "iceServers": [
+                {
+                    "urls": "stun:stun.relay.metered.ca:80",
+                }
+            ]
+        }
+
+    return {
+        "iceServers": [
+            {
+                "urls": "stun:stun.relay.metered.ca:80",
+            },
+            {
+                "urls": "turn:global.relay.metered.ca:80",
+                "username": turn_username,
+                "credential": turn_credential,
+            },
+            {
+                "urls": "turn:global.relay.metered.ca:80?transport=tcp",
+                "username": turn_username,
+                "credential": turn_credential,
+            },
+            {
+                "urls": "turn:global.relay.metered.ca:443",
+                "username": turn_username,
+                "credential": turn_credential,
+            },
+            {
+                "urls": "turns:global.relay.metered.ca:443?transport=tcp",
+                "username": turn_username,
+                "credential": turn_credential,
+            },
+        ]
+    }
 
 # =========================================================
 # PAGE CONFIG
@@ -1152,15 +1218,7 @@ elif st.session_state.mode == "live":
                 "audio": True,
             },
 
-            rtc_configuration={
-                "iceServers": [
-                    {
-                        "urls": [
-                            "stun:stun.l.google.com:19302"
-                        ]
-                    }
-                ]
-            },
+            rtc_configuration=get_rtc_configuration(),
 
             # Browser microphone is input-only for analysis.
             # Prevent playback of the user's own microphone.
