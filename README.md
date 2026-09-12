@@ -24,7 +24,7 @@ The application supports both:
 
 ### 🎥 Real-Time Presentation Analysis
 
-PresentAI Coach can analyze a presentation directly from the user's webcam.
+PresentAI Coach can analyze a presentation directly from the user's browser using camera and microphone access through WebRTC.
 
 During a session, the system tracks:
 
@@ -37,6 +37,8 @@ During a session, the system tracks:
 - Speech fluency
 
 The visual pipeline is optimized to avoid running expensive computer-vision models unnecessarily on every frame.
+
+Browser microphone audio is captured through WebRTC and passed to the shared speech-analysis pipeline, allowing live presentations to receive the same speech evaluation used for uploaded recordings.
 
 ---
 
@@ -110,7 +112,7 @@ This is designed as a **presentation-delivery heuristic**, not medical or clinic
 
 ### 🎙️ Speech Analysis
 
-PresentAI Coach uses **Faster-Whisper** for local speech recognition.
+PresentAI Coach uses **Faster-Whisper** for speech recognition.
 
 The speech pipeline evaluates:
 
@@ -124,7 +126,9 @@ The speech pipeline evaluates:
 - Recognition confidence
 - Full presentation transcript
 
-Speech analysis is shared between uploaded-video and live-presentation workflows.
+The same speech-analysis logic is shared between uploaded-video and live-presentation workflows.
+
+For live sessions, browser microphone audio is captured through WebRTC and processed after the presentation is completed. For uploaded presentations, audio is extracted from the video and passed through the same speech-analysis pipeline.
 
 ---
 
@@ -224,46 +228,42 @@ The agent is explicitly instructed not to overwrite objective analytical scores 
                  ┌─────────────┴─────────────┐
                  │                           │
                  ▼                           ▼
-          Live Webcam                  Uploaded Video
+        Live Browser Session           Uploaded Video
+       Camera + Microphone                    │
+                 │                           │
+                 └─────────────┬─────────────┘
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+                 ▼                           ▼
+         VisualAnalyzer               SpeechAnalyzer
+                 │                           │
+      ┌──────────┼──────────┐                │
+      │          │          │                │
+      ▼          ▼          ▼                │
+   Posture    Gestures     Gaze              │
+      │          │          │                │
+      └──────────┼──────────┘                │
                  │                           │
                  └─────────────┬─────────────┘
                                │
                                ▼
-                      ┌────────────────┐
-                      │ VisualAnalyzer │
-                      └───────┬────────┘
-                              │
-               ┌──────────────┼──────────────┐
-               │              │              │
-               ▼              ▼              ▼
-           Posture         Gestures         Gaze
-               │              │              │
-               └──────────────┼──────────────┘
-                              │
-                              ▼
-                       Session Manager
-                              ▲
-                              │
-                      ┌───────┴────────┐
-                      │ SpeechAnalyzer │
-                      └───────▲────────┘
-                              │
-                    Microphone / Audio
-                              │
-                              ▼
+                        SessionManager
+                               │
+                               ▼
                     Unified Analysis Report
-                              │
-                              ▼
-                       LangGraph Agent
-                              │
-                              ▼
-                      Gemini Reasoning
-                              │
-                              ▼
-                  Personalized AI Coaching
-                              │
-                              ▼
-                       Streamlit UI
+                               │
+                               ▼
+                        LangGraph Agent
+                               │
+                               ▼
+                       Gemini Reasoning
+                               │
+                               ▼
+                Personalized AI Coaching
+                               │
+                               ▼
+                         Streamlit UI
 ```
 
 ---
@@ -273,18 +273,18 @@ The agent is explicitly instructed not to overwrite objective analytical scores 
 The application intentionally avoids maintaining separate analytical implementations for live and uploaded presentations.
 
 ```text
-              VisualAnalyzer
-               /          \
-          Webcam          Upload
-            ↓               ↓
-       Microphone       Video Audio
-               \          /
-               SpeechAnalyzer
-                     ↓
-               SessionManager
-                     ↓
-               Unified Report
-                     ↓
+             VisualAnalyzer
+              /          \
+         Live Video      Upload
+             ↓             ↓
+       Browser Mic     Video Audio
+              \          /
+              SpeechAnalyzer
+                    ↓
+              SessionManager
+                    ↓
+              Unified Report
+                    ↓
                  AI Coach
 ```
 
@@ -327,11 +327,18 @@ This allows both modes to use the same underlying analytical logic and keeps res
 - LangChain Google GenAI
 - Pydantic structured outputs
 
-### User Interface
+### User Interface & Real-Time Communication
 
 - Streamlit
 - Streamlit WebRTC
 - PyAV
+- WebRTC
+- STUN/TURN connectivity
+
+### Deployment
+
+- Streamlit Community Cloud
+- Metered TURN/STUN infrastructure for cloud WebRTC connectivity
 
 ---
 
@@ -341,40 +348,25 @@ This allows both modes to use the same underlying analytical logic and keeps res
 PresentAI Coach/
 │
 ├── app.py
-│
 ├── ai_coach_agent.py
-│
 ├── visual_analyzer.py
-│
 ├── video_analyzer.py
-│
 ├── live_analyzer.py
-│
 ├── speech_analyzer.py
-│
 ├── session_manager.py
-│
 ├── posture_scorer.py
-│
 ├── gesture_analyzer.py
-│
 ├── gaze_analyzer.py
-│
 ├── feature_extractor.py
-│
 ├── media_utils.py
-│
 ├── vision.py
-│
 ├── dataset_processor.py
-│
 ├── video_processor.py
-│
 ├── train_classifier.py
-│
 ├── evaluate_classifier.py
-│
+├── generate_submission_results.ipynb
 ├── requirements.txt
+├── packages.txt
 ├── README.md
 ├── .gitignore
 │
@@ -383,6 +375,15 @@ PresentAI Coach/
 │   ├── face_landmarker.task
 │   ├── posture_classifier.pkl
 │   └── posture_classifier_eval.pkl
+│
+├── results/
+│   ├── 01_class_distribution.png
+│   ├── 02_dataset_source_distribution.png
+│   ├── 03_confusion_matrix.png
+│   ├── 04_roc_curve.png
+│   ├── 05_model_performance.png
+│   ├── model_metrics.csv
+│   └── classification_report.csv
 │
 └── tests/
     ├── __init__.py
@@ -400,7 +401,7 @@ PresentAI Coach/
 
 ```bash
 git clone https://github.com/syedamahnoor-sm/PresentAI-Coach
-cd "PresentAI Coach"
+cd "PresentAI-Coach"
 ```
 
 ### 2. Create a Virtual Environment
@@ -422,18 +423,29 @@ FFmpeg must also be installed and available through the system PATH for uploaded
 
 ---
 
-## 🔑 Gemini Configuration
+## 🔑 Environment Configuration
 
-PresentAI Coach uses the Gemini API for the agentic coaching stage.
+PresentAI Coach uses environment variables for Gemini-powered AI coaching and authenticated TURN connectivity.
 
-Create a `.env` file in the project root:
+For local development, create a `.env` file in the project root:
 
 ```env
 GOOGLE_API_KEY=your_google_gemini_api_key
 PRESENTAI_LLM_MODEL=gemini-3.6-flash
+TURN_USERNAME=your_turn_username
+TURN_CREDENTIAL=your_turn_credential
 ```
 
-> **Important:** Never commit `.env` or API keys to Git.
+The variables are used as follows:
+
+- `GOOGLE_API_KEY` — authenticates requests used by the Gemini-powered coaching workflow.
+- `PRESENTAI_LLM_MODEL` — specifies the Gemini model used by the AI coaching agent.
+- `TURN_USERNAME` — username used for authenticated TURN connectivity.
+- `TURN_CREDENTIAL` — credential used for authenticated TURN connectivity.
+
+For **Streamlit Community Cloud**, secret values should be configured through the application's Streamlit Secrets rather than committed to the repository.
+
+> **Important:** Never commit `.env`, API keys, TURN credentials, or other secrets to Git.
 
 Ensure `.gitignore` contains:
 
@@ -454,17 +466,53 @@ Start the Streamlit application:
 streamlit run app.py
 ```
 
-The application will open in your browser.
+The application will open in the browser.
 
 From the home page, select either:
 
 ### 🎥 Real-Time Practice
 
-Start a webcam-based presentation session and receive visual and speech analysis followed by AI-generated coaching.
+Start a browser-based presentation session using camera and microphone access.
+
+The live workflow analyzes:
+
+- Posture
+- Gestures
+- Eye contact
+- Speech pace
+- Filler words
+- Pauses
+- Fluency
+
+When the presentation is finished, the visual and speech results are combined into a unified report and passed to the AI coaching workflow.
 
 ### ☁️ Video Recording Analysis
 
 Upload a recorded presentation and run the complete multimodal analysis pipeline.
+
+The uploaded-video workflow analyzes both visual frames and extracted audio before generating the final report and personalized AI coaching.
+
+---
+
+## ☁️ Deployment
+
+PresentAI Coach is deployed using **Streamlit Community Cloud**.
+
+The deployed application supports:
+
+- Browser-based camera access
+- Browser-based microphone access
+- Real-time WebRTC presentation sessions
+- STUN/TURN connectivity for remote WebRTC communication
+- Uploaded-video analysis
+- Faster-Whisper speech processing
+- ML-based posture analysis
+- Gesture and eye-contact analysis
+- Gemini-powered agentic coaching
+
+Authenticated TURN connectivity is used to improve WebRTC reliability when direct peer connectivity is unavailable in cloud environments.
+
+Deployment credentials and API keys are stored using secret-management configuration and are **not included in the repository**.
 
 ---
 
@@ -504,33 +552,82 @@ The posture model was trained using a combination of:
 - External posture-image samples
 - Synthetic samples
 
-The final training dataset contained approximately **1,000 labeled samples**, distributed between good and poor presentation-alignment examples.
+The final training dataset contained **998 labeled samples**:
 
-To reduce data leakage during evaluation, related samples were grouped when creating train/test splits.
+- **BAD:** 522 samples
+- **GOOD:** 476 samples
 
-Multiple classifiers were evaluated, with **Random Forest** selected for the final implementation.
+The samples were obtained from:
 
-On the unseen grouped holdout set, the selected model achieved approximately:
+- **Real presentation video:** 626 samples
+- **External/Roboflow data:** 310 samples
+- **Synthetic data:** 62 samples
 
-- **Accuracy:** 74.7%
-- **Macro F1:** 74.5%
-- **ROC-AUC:** 80.7%
+Related samples were grouped during model evaluation to reduce data leakage between training and testing data.
+
+Multiple classifiers were evaluated, including:
+
+- Logistic Regression
+- Random Forest
+- RBF Support Vector Machine
+
+**Random Forest** was selected for the final implementation.
+
+The selected model was evaluated on an unseen group-safe holdout set.
+
+### Model Evaluation Results
+
+| Metric | Result |
+|---|---:|
+| Accuracy | **74.7%** |
+| Macro F1 | **74.5%** |
+| ROC-AUC | **80.7%** |
 
 These results should be interpreted as performance on the project's presentation-posture dataset rather than as a universal posture benchmark.
 
 ---
 
+## 📈 Evaluation Evidence
+
+Model evaluation evidence is preserved in the `results/` directory.
+
+Generated artifacts include:
+
+- Class distribution visualization
+- Dataset source distribution visualization
+- Confusion matrix
+- ROC curve
+- Model performance visualization
+- Model metrics CSV
+- Classification report CSV
+
+The repository also contains:
+
+```text
+generate_submission_results.ipynb
+```
+
+This notebook generates the visual evaluation evidence from the saved evaluation model and holdout information without retraining the final production model.
+
+---
+
 ## 🔐 Privacy and Data Handling
 
-The core computer-vision and speech-processing pipelines run locally.
+PresentAI Coach processes presentation media only as required for analysis.
 
-Uploaded presentation videos are processed using the local application pipeline, and temporary media files are removed after processing.
+For uploaded presentations, Streamlit temporarily writes the uploaded video to the processing environment. The temporary video is removed after analysis.
 
-For AI-generated coaching, analytical results and relevant transcript content are sent to the configured Gemini service.
+For live presentations, browser camera and microphone streams are used during the active WebRTC presentation session.
 
-Therefore, users should avoid submitting confidential presentation content when using an API configuration whose data-handling terms are unsuitable for that material.
+When PresentAI Coach is run locally, computer-vision and speech-processing operations execute on the local machine.
 
-API keys are loaded through environment variables and should never be committed to source control.
+When the deployed Streamlit application is used, analysis is performed within the deployed application environment.
+
+For AI-generated coaching, analytical results and relevant transcript content are sent to the configured Gemini service so that personalized coaching can be generated.
+
+Users should avoid submitting confidential presentation material when the data-handling terms of the configured external services are unsuitable for that content.
+
+API keys and TURN credentials are loaded through environment or secret configuration and are never intended to be committed to source control.
 
 ---
 
@@ -543,7 +640,7 @@ PresentAI Coach is a capstone/prototype system and has several known limitations
 - Eye-contact estimation is a presentation heuristic rather than precise eye tracking.
 - Speech-recognition accuracy depends on microphone quality, background noise, and speaker clarity.
 - AI coaching quality depends on the accuracy of the analytical evidence provided to the agent.
-- Real-time performance depends on available CPU and camera hardware.
+- Real-time performance depends on available compute resources, browser/network conditions, and camera hardware.
 - Presentation-quality metrics are coaching signals and should not be treated as medical, psychological, or ergonomic assessments.
 
 ---
@@ -566,6 +663,8 @@ and select an appropriate analysis strategy instead of forcing the same model on
 
 Develop a dedicated model for realistic laptop/webcam framing where only the head, shoulders, and chest are visible.
 
+This model could operate alongside the existing full-body posture classifier instead of replacing it.
+
 ### Personal Calibration
 
 Allow presenters to establish a short neutral baseline before a session to account for:
@@ -577,11 +676,11 @@ Allow presenters to establish a short neutral baseline before a session to accou
 
 ### Session-to-Session Progress Tracking
 
-Use persistent LangGraph state or application storage to compare multiple presentation attempts and allow the AI coach to reason about improvement over time.
+Use persistent application state or storage to compare multiple presentation attempts and allow the AI coach to reason about improvement over time.
 
 ### Enhanced Coaching Memory
 
-Allow the coach to remember previous goals and evaluate whether the presenter improved those specific areas in the next session.
+Allow the coach to remember previous presentation goals and evaluate whether the presenter improved those specific areas in later sessions.
 
 ---
 
@@ -615,11 +714,12 @@ This hybrid approach allows deterministic analytical components to handle measur
 
 ## 📌 Project Status
 
-**PresentAI Coach v1 — Capstone Complete ✅**
+**PresentAI Coach — Capstone Complete & Deployed ✅**
 
 Implemented:
 
-- ✅ Real-time visual presentation analysis
+- ✅ Real-time browser-based visual presentation analysis
+- ✅ Browser camera and microphone capture through WebRTC
 - ✅ Uploaded-video analysis
 - ✅ ML-based posture scoring
 - ✅ Gesture analysis
@@ -631,6 +731,10 @@ Implemented:
 - ✅ Gemini-powered personalized coaching
 - ✅ AI critic and coaching-quality review
 - ✅ Shared Live/Upload analytical architecture
+- ✅ Streamlit Community Cloud deployment
+- ✅ STUN/TURN support for cloud WebRTC connectivity
+- ✅ Model evaluation metrics
+- ✅ Evaluation graphs and submission visualizations
 
 Further improvements are planned as future development rather than requirements for the initial capstone release.
 
@@ -640,7 +744,7 @@ Further improvements are planned as future development rather than requirements 
 
 **Syeda Mahnoor**
 
-Software Engineering Student  
+Software Engineering Student
 
 ---
 
