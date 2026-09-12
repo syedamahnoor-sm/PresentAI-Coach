@@ -954,7 +954,7 @@ if st.session_state.mode is None:
                 unsafe_allow_html=True,
             )
 
-            st.caption("🔒 Local processing • Your recording stays private")
+            st.caption("🎙️ Camera and microphone permissions are required for live analysis.")
             st.write("")
 
             if st.button("Start Live Session →", key="live_home", type="primary"):
@@ -983,7 +983,7 @@ if st.session_state.mode is None:
                 unsafe_allow_html=True,
             )
 
-            st.caption("🔒 Local processing • Your recording stays private")
+            st.caption("🎬 Your uploaded recording is processed only to generate the analysis.")
             st.write("")
 
             if st.button("Upload Recording →", key="upload_home", type="primary"):
@@ -1143,9 +1143,13 @@ elif st.session_state.mode == "live":
 
             video_frame_callback=live_analyzer.process_frame,
 
+            audio_frame_callback=(
+                live_analyzer.process_audio_frame
+            ),
+
             media_stream_constraints={
                 "video": True,
-                "audio": False,
+                "audio": True,
             },
 
             rtc_configuration={
@@ -1157,6 +1161,10 @@ elif st.session_state.mode == "live":
                     }
                 ]
             },
+
+            # Browser microphone is input-only for analysis.
+            # Prevent playback of the user's own microphone.
+            sendback_audio=False,
 
             async_processing=True,
         )
