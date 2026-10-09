@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 
@@ -9,6 +10,18 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from video_analyzer import analyze_video
 from live_analyzer import LivePresentationAnalyzer
 from ai_coach_agent import AICoachAgent
+
+
+logger = logging.getLogger("presentai")
+
+
+def show_error(error):
+    """Log the full traceback on the server; only show it in the UI when
+    PRESENTAI_DEBUG=1 (stack traces expose file paths and internals)."""
+    logger.error("Unhandled error", exc_info=error)
+
+    if os.getenv("PRESENTAI_DEBUG") == "1":
+        st.exception(error)
 
 # Load local environment variables from .env when available.
 # On Streamlit Cloud, TURN credentials can also be read from st.secrets.
@@ -1179,7 +1192,7 @@ elif st.session_state.mode == "live":
                     "Could not start live presentation."
                 )
 
-                st.exception(
+                show_error(
                     error
                 )
 
@@ -1377,7 +1390,7 @@ elif st.session_state.mode == "live":
                             "but AI coaching could not be generated."
                         )
 
-                        st.exception(
+                        show_error(
                             agent_error
                         )
 
@@ -1394,7 +1407,7 @@ elif st.session_state.mode == "live":
                     "Could not finalize live presentation."
                 )
 
-                st.exception(
+                show_error(
                     error
                 )
 
@@ -1579,7 +1592,7 @@ elif st.session_state.mode == "upload":
                             "but AI coaching could not be generated."
                             )
 
-                        st.exception(
+                        show_error(
                             agent_error
                         )
 
@@ -1593,7 +1606,7 @@ elif st.session_state.mode == "upload":
                     "Presentation analysis failed."
                 )
 
-                st.exception(
+                show_error(
                     error
                 )
 
