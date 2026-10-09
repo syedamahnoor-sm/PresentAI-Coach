@@ -518,6 +518,23 @@ Deployment credentials and API keys are stored using secret-management configura
 
 ## 🧪 Running Tests
 
+### Automated tests (pytest)
+
+The core scoring and agent logic is covered by an automated suite that needs no
+camera, microphone, model download or API key:
+
+```
+pip install pytest
+pytest
+```
+
+It runs on every push through GitHub Actions (`.github/workflows/tests.yml`).
+
+### Interactive demos
+
+The scripts below are manual demos (they use a microphone, webcam or the live
+Gemini API) and are not part of the automated suite:
+
 Run tests from the project root.
 
 For example:

@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 from collections import Counter
 
@@ -420,8 +421,12 @@ class SpeechAnalyzer:
 
         for phrase in self.phrase_fillers:
 
-            count = transcript.count(
-                phrase
+            # Whole-word match so "i mean" does not match inside "i meant"
+            count = len(
+                re.findall(
+                    rf"\b{re.escape(phrase)}\b",
+                    transcript
+                )
             )
 
             if count > 0:
@@ -638,10 +643,13 @@ class SpeechAnalyzer:
         if word_count == 0:
             return 100.0
 
+        # Multiply first: (7 / 100) * 100.0 is 7.000000000000001 in floating
+        # point, which pushed exactly-7% over the "<= 7" boundary.
         filler_rate = (
             filler_count
+            * 100.0
             / word_count
-        ) * 100.0
+        )
 
         if filler_rate <= 2:
             return 100.0
@@ -792,8 +800,9 @@ class SpeechAnalyzer:
 
             filler_rate = (
                 filler_count
+                * 100.0
                 / word_count
-            ) * 100.0
+            )
 
             if filler_rate > 5:
 
@@ -962,8 +971,9 @@ class SpeechAnalyzer:
 
             filler_rate = (
                 filler_count
+                * 100.0
                 / word_count
-            ) * 100.0
+            )
 
         # ---------------------------------------------
         # Confidence
